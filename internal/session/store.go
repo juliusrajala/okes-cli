@@ -24,8 +24,8 @@ var (
 
 // Store persists session metadata in an explicitly selected private directory.
 // Create reserves identities but does not create containers or own workspaces.
-// Call Close to release its directory handles. General mutation and lifecycle
-// locking, updates, listing, and removal are not implemented in this slice.
+// Call Close to release its directory handles. Create and Update share a metadata
+// lock. Container lifecycle locking and metadata removal are not implemented.
 type Store struct {
 	root     *os.Root
 	sessions *os.Root
@@ -80,7 +80,7 @@ func (s *Store) Create(ctx context.Context, record Record) (err error) {
 	if err := s.checkDirectories(); err != nil {
 		return err
 	}
-	unlock, err := s.lockCreate(ctx)
+	unlock, err := s.lockMetadata(ctx)
 	if err != nil {
 		return err
 	}
@@ -116,6 +116,57 @@ func (s *Store) Create(ctx context.Context, record Record) (err error) {
 	return nil
 }
 
+// Update atomically replaces an existing session record while preserving its
+// identity and name reservation. In the current schema, only a pending container
+// ID can be bound to a real ID; all other saved facts stay fixed. Repeating the
+// same update is safe. This method does not verify runtime ownership.
+//
+// Failure before publication leaves the old record intact. A sync or unlock error
+// after publication does not prove that the update failed; load the record again.
+func (s *Store) Update(ctx context.Context, record Record) (err error) {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := record.Validate(); err != nil {
+		return err
+	}
+	data, err := encodeStoreJSON(record)
+	if err != nil {
+		return err
+	}
+	if err := s.checkDirectories(); err != nil {
+		return err
+	}
+	unlock, err := s.lockMetadata(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, unlock()) }()
+
+	currentData, info, err := readStoreFile(ctx, s.sessions, recordPath(record.ID))
+	if err != nil {
+		return metadataReadError("read session for update", err)
+	}
+	current, err := decodeRecord(currentData, record.ID)
+	if err != nil {
+		return err
+	}
+	reservation, err := s.readName(ctx, current.Name)
+	if err != nil {
+		return fmt.Errorf("%w: cannot verify update reservation: %w", ErrCorruptRecord, err)
+	}
+	if reservation.ID != current.ID {
+		return fmt.Errorf("%w: update reservation points to another session", ErrCorruptRecord)
+	}
+	if err := validateRecordUpdate(current, record); err != nil {
+		return err
+	}
+	if err := replaceStoreFile(ctx, s.sessions, recordPath(record.ID), data, info); err != nil {
+		return fmt.Errorf("update session: %w", err)
+	}
+	return nil
+}
+
 // Get loads a record by its immutable ID. Missing metadata does not establish
 // runtime absence. Every read checks file safety, JSON shape, and record identity.
 func (s *Store) Get(ctx context.Context, id ID) (Record, error) {
@@ -133,6 +184,10 @@ func (s *Store) Get(ctx context.Context, id ID) (Record, error) {
 		return Record{}, metadataReadError("read session", err)
 	}
 
+	return decodeRecord(data, id)
+}
+
+func decodeRecord(data []byte, id ID) (Record, error) {
 	// The pointer distinguishes a required false value from missing or null tty.
 	type recordJSON Record
 	var record Record
@@ -154,6 +209,26 @@ func (s *Store) Get(ctx context.Context, id ID) (Record, error) {
 		return Record{}, fmt.Errorf("%w: record ID does not match its filename", ErrCorruptRecord)
 	}
 	return record, nil
+}
+
+// List returns validated saved records in filename order for later runtime
+// inspection. It reads metadata only, not container status. A bad or unreadable
+// record fails the whole query with a nil result; lookup never repairs or deletes
+// files. The result is not an atomic snapshot across multiple records.
+func (s *Store) List(ctx context.Context) ([]Record, error) {
+	records, err := s.recordIDs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var result []Record
+	for _, id := range records {
+		record, err := s.Get(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, record)
+	}
+	return result, nil
 }
 
 // Resolve loads a session by its case-sensitive name and verifies that its

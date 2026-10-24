@@ -420,7 +420,7 @@ func TestStoreDetectsChangedDirectoryPermissions(t *testing.T) {
 
 func TestStoreCreateLockCancellation(t *testing.T) {
 	store := testStore(t, t.TempDir())
-	unlock, err := store.lockCreate(context.Background())
+	unlock, err := store.lockMetadata(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -490,6 +490,117 @@ func TestStoreDoesNotReleaseAnotherReservation(t *testing.T) {
 	}
 	if err := store.Create(context.Background(), record); !errors.Is(err, ErrAlreadyExists) {
 		t.Fatalf("Create error = %v, want reservation to stay reserved", err)
+	}
+}
+
+func TestStoreList(t *testing.T) {
+	t.Run("empty store", func(t *testing.T) {
+		store := testStore(t, t.TempDir())
+		records, err := store.List(context.Background())
+		if err != nil || len(records) != 0 {
+			t.Fatalf("records = %v, error = %v, want empty result", records, err)
+		}
+	})
+	t.Run("updated records in filename order", func(t *testing.T) {
+		store := testStore(t, t.TempDir())
+		first := validRecord()
+		second := first
+		second.ID = "8ad20f51-6067-4dc4-a072-54c94d7735de"
+		second.Name = "second-session"
+		second.ContainerName = "pi-sesh-" + string(second.ID)
+		createRecord(t, store, second)
+		createRecord(t, store, first)
+		first.ContainerID = strings.Repeat("b", 64)
+		if err := store.Update(context.Background(), first); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.sessions.WriteFile(".unfinished.json.random.tmp", []byte("untouched"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		records, err := store.List(context.Background())
+		if err != nil || len(records) != 2 {
+			t.Fatalf("records = %v, error = %v, want two records", records, err)
+		}
+		if records[0] != first || records[1] != second {
+			t.Fatalf("unexpected listed records: %+v", records)
+		}
+		data, err := store.sessions.ReadFile(".unfinished.json.random.tmp")
+		if err != nil || string(data) != "untouched" {
+			t.Fatalf("listing changed staging input: %q, %v", data, err)
+		}
+	})
+	t.Run("cancelled", func(t *testing.T) {
+		store := testStore(t, t.TempDir())
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		records, err := store.List(ctx)
+		if !errors.Is(err, context.Canceled) || records != nil {
+			t.Fatalf("records = %v, error = %v, want nil and context.Canceled", records, err)
+		}
+	})
+	tests := []struct {
+		name    string
+		setup   func(*testing.T, *Store, Record)
+		wantErr error
+	}{
+		{name: "corrupt last record", wantErr: ErrCorruptRecord, setup: func(t *testing.T, s *Store, r Record) {
+			if err := s.sessions.WriteFile(recordPath(r.ID), []byte(`{`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "unsafe last record", wantErr: ErrUnsafeStore, setup: func(t *testing.T, s *Store, r Record) {
+			if err := s.sessions.Chmod(recordPath(r.ID), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "directory instead of last record", wantErr: ErrUnsafeStore, setup: func(t *testing.T, s *Store, r Record) {
+			if err := s.sessions.Remove(recordPath(r.ID)); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.sessions.Mkdir(recordPath(r.ID), 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "invalid JSON filename", wantErr: ErrCorruptRecord, setup: func(t *testing.T, s *Store, r Record) {
+			if err := s.sessions.WriteFile("not-a-uuid.json", []byte(`{}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "unknown fields in last record", wantErr: ErrCorruptRecord, setup: func(t *testing.T, s *Store, r Record) {
+			data, err := encodeStoreJSON(r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			data = append([]byte(`{"unknown":true,`), data[1:]...)
+			if err := s.sessions.WriteFile(recordPath(r.ID), data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := testStore(t, t.TempDir())
+			first := validRecord()
+			last := first
+			last.ID = "8ad20f51-6067-4dc4-a072-54c94d7735de"
+			last.Name = "last-session"
+			last.ContainerName = "pi-sesh-" + string(last.ID)
+			createRecord(t, store, first)
+			createRecord(t, store, last)
+			tt.setup(t, store, last)
+			records, err := store.List(context.Background())
+			if !errors.Is(err, tt.wantErr) || records != nil {
+				t.Fatalf("records = %v, error = %v, want nil and %v", records, err, tt.wantErr)
+			}
+			for _, record := range []Record{first, last} {
+				if _, err := store.names.Lstat(namePath(record.Name)); err != nil {
+					t.Fatalf("listing changed a reservation: %v", err)
+				}
+				if _, err := store.sessions.Lstat(recordPath(record.ID)); err != nil {
+					t.Fatalf("listing removed invalid metadata: %v", err)
+				}
+			}
+		})
 	}
 }
 

@@ -8,8 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -131,36 +133,11 @@ func readStoreFile(ctx context.Context, root *os.Root, path string) (data []byte
 // A same-directory hard link gives create-if-absent atomic publication. A rename
 // alone would overwrite another identity reservation. os.Root confines the paths.
 func publishStoreFile(ctx context.Context, root *os.Root, path string, data []byte) (published bool, err error) {
-	if err := ctx.Err(); err != nil {
-		return false, err
-	}
-	temporary := "." + path + "." + rand.Text() + ".tmp"
-	file, err := root.OpenFile(temporary, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o600)
+	temporary, info, err := stageStoreFile(ctx, root, path, data)
 	if err != nil {
 		return false, err
 	}
-	info, statErr := file.Stat()
-	if statErr != nil {
-		// Without identity proof, leave the temporary path for recovery.
-		return false, errors.Join(statErr, file.Close())
-	}
-	defer func() {
-		if file != nil {
-			err = errors.Join(err, file.Close())
-		}
-		err = errors.Join(err, removeStoreFile(root, temporary, info))
-	}()
-	if _, err := file.Write(data); err != nil {
-		return false, err
-	}
-	if err := file.Sync(); err != nil {
-		return false, err
-	}
-	closeErr := file.Close()
-	file = nil
-	if closeErr != nil {
-		return false, closeErr
-	}
+	defer func() { err = errors.Join(err, removeStoreFile(root, temporary, info)) }()
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
@@ -168,6 +145,73 @@ func publishStoreFile(ctx context.Context, root *os.Root, path string, data []by
 		return false, err
 	}
 	return true, syncStoreDirectory(root)
+}
+
+// Replace only the file whose identity was checked while reading the current
+// record. Cooperating writers must hold the metadata lock across read and replace.
+func replaceStoreFile(ctx context.Context, root *os.Root, path string, data []byte, expected os.FileInfo) (err error) {
+	temporary, info, err := stageStoreFile(ctx, root, path, data)
+	if err != nil {
+		return err
+	}
+	renamed := false
+	defer func() {
+		if !renamed {
+			err = errors.Join(err, removeStoreFile(root, temporary, info))
+		}
+	}()
+	current, err := root.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if err := checkStoreInfo(current, false); err != nil {
+		return err
+	}
+	if !os.SameFile(current, expected) {
+		return fmt.Errorf("%w: refusing to replace changed metadata %q", ErrUnsafeStore, path)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := root.Rename(temporary, path); err != nil {
+		return err
+	}
+	renamed = true
+	return syncStoreDirectory(root)
+}
+
+// Both create and update stage a complete private file in the destination
+// directory. Close and sync it before either publication operation uses it.
+func stageStoreFile(ctx context.Context, root *os.Root, path string, data []byte) (temporary string, info os.FileInfo, err error) {
+	if err := ctx.Err(); err != nil {
+		return "", nil, err
+	}
+	temporary = "." + path + "." + rand.Text() + ".tmp"
+	file, err := root.OpenFile(temporary, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o600)
+	if err != nil {
+		return "", nil, err
+	}
+	defer func() {
+		err = errors.Join(err, file.Close())
+		if err != nil && info != nil {
+			err = errors.Join(err, removeStoreFile(root, temporary, info))
+		}
+	}()
+	info, err = file.Stat()
+	if err != nil {
+		// Without identity proof, leave the temporary path for recovery.
+		return temporary, nil, err
+	}
+	if _, err := file.Write(data); err != nil {
+		return temporary, info, err
+	}
+	if err := file.Sync(); err != nil {
+		return temporary, info, err
+	}
+	if err := ctx.Err(); err != nil {
+		return temporary, info, err
+	}
+	return temporary, info, nil
 }
 
 func removeStoreFile(root *os.Root, path string, expected os.FileInfo) error {
@@ -195,6 +239,36 @@ func syncStoreDirectory(root *os.Root) error {
 	return errors.Join(directory.Sync(), directory.Close())
 }
 
+// Return IDs in filename order. Only published .json records are candidates;
+// staging files remain untouched. Get must still validate each file and record.
+func (s *Store) recordIDs(ctx context.Context) ([]ID, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := s.checkDirectories(); err != nil {
+		return nil, err
+	}
+	entries, err := fs.ReadDir(s.sessions.FS(), ".")
+	if err != nil {
+		return nil, fmt.Errorf("read session directory: %w", err)
+	}
+	ids := make([]ID, 0, len(entries))
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		id, err := ParseID(strings.TrimSuffix(entry.Name(), ".json"))
+		if err != nil {
+			return nil, fmt.Errorf("%w: invalid session filename %q: %w", ErrCorruptRecord, entry.Name(), err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
 func decodeStoreJSON(data []byte, value any) error {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
@@ -208,9 +282,10 @@ func decodeStoreJSON(data []byte, value any) error {
 	return nil
 }
 
-// Serialize identity creation across store handles and CLI processes. Later
-// lifecycle locks need a per-session scope; this lock protects only Create.
-func (s *Store) lockCreate(ctx context.Context) (func() error, error) {
+// Serialize metadata creation and updates across store handles and CLI processes.
+// Keep the existing filename so older store handles use the same lock. This is
+// not the per-session lock needed around container lifecycle operations.
+func (s *Store) lockMetadata(ctx context.Context) (func() error, error) {
 	file, err := s.root.OpenFile(".create.lock", os.O_RDWR|os.O_CREATE|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0o600)
 	if err != nil {
 		return nil, err

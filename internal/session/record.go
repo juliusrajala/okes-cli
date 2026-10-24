@@ -79,3 +79,18 @@ func (r Record) Validate() error {
 	}
 	return nil
 }
+
+// Compare all fixed fields, but compare timestamps by instant. JSON removes Go's
+// monotonic clock data and can change the time zone representation on a reload.
+func validateRecordUpdate(current, next Record) error {
+	fixed := next
+	fixed.ContainerID = current.ContainerID
+	fixed.CreatedAt = current.CreatedAt
+	if fixed != current || !next.CreatedAt.Equal(current.CreatedAt) {
+		return fmt.Errorf("%w: update cannot change saved session facts other than the container ID", ErrInvalidRecord)
+	}
+	if current.ContainerID != PendingContainerID && next.ContainerID != current.ContainerID {
+		return fmt.Errorf("%w: update cannot replace an already bound container ID", ErrInvalidRecord)
+	}
+	return nil
+}

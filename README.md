@@ -10,7 +10,7 @@ The default capture limit is 16 MiB per output stream. An omitted environment me
 
 Cancellation stops the direct host process. It does not prove that a container workload or descendant process has stopped. A supplied stdin reader must not block indefinitely.
 
-`internal/session` provides session ID/name validation and a file-backed store. It can reserve a name, save a version-2 record, reopen the store, and load the record by ID or its case-sensitive name. See the [session store notes](docs/session-store.md) for safety rules and current limits.
+`internal/session` provides session ID/name validation and a file-backed store. It can reserve a name, save a version-2 record, reopen the store, and load the record by ID or its case-sensitive name. It can atomically bind a pending record to a container ID without changing the other saved session facts. It can list validated saved records without changing files. See the [session store notes](docs/session-store.md) for safety rules and current limits.
 
 `internal/runtime` defines normalized container states and validates known state values. Neither package starts or inspects containers yet.
 

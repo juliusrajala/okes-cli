@@ -1,4 +1,4 @@
-# Session store: first persistence slice
+# Session store
 
 The store saves session metadata. It does not start containers, inspect runtime state, or own source directories.
 
@@ -13,6 +13,10 @@ go test -v ./internal/session -run '^TestStoreCreateReopenGet$'
 ```
 
 `Store.Resolve(ctx, name)` loads the name reservation, loads its referenced record, and checks that the record has the requested name. Read errors retain their categories. A failed lookup does not delete or repair saved data. This converts a human-readable alias into verified saved identity; it does not inspect the container.
+
+`Store.Update(ctx, record)` atomically binds a pending record to a container ID. Other saved facts and the name reservation stay fixed. Repeating the same binding is safe; replacing a bound ID or resetting it to pending is rejected. Update never creates a missing record or repairs an unsafe existing record.
+
+`Store.List(ctx)` loads every candidate through `Get` in filename order. It fails with a nil result on any error and leaves staging files and reservations untouched. It returns metadata, not live container state or an atomic multi-record snapshot.
 
 ## Record schema
 
@@ -40,17 +44,19 @@ Directory handles anchor operations with Go's `os.Root`. Reads reject symlinks a
 
 ## Creation, interruption, and concurrency
 
-Creation validates and encodes the record, takes a filesystem creation lock, checks ID availability, reserves the name, and publishes the record. Each file is written privately and synced before atomic create-if-absent publication. Existing files are never overwritten.
+Creation validates and encodes the record, takes a filesystem metadata lock, checks ID availability, reserves the name, and publishes the record. Each file is written privately and synced before atomic create-if-absent publication. Create never overwrites an existing file.
 
 The alias and record are two separate files, not an atomic two-file transaction. A process crash can leave a reservation without a record. Keep that reservation for explicit recovery. Do not automatically reuse a reserved name because metadata is missing.
 
 On an observed creation failure, the store releases its new reservation only if it proves that no record was published and the reservation still matches the attempted session. Uncertain or published data remains reserved for recovery. Cleanup checks file identity before unlinking temporary files or the matching reservation.
 
-A filesystem lock serializes creation across cooperating store handles and processes. Lock waits observe context cancellation. This is not the later per-session mutation lock needed by exec, stop, update, and remove.
+Updates take the same lock, validate the current record and name binding, and stage a complete private replacement. A checked rename publishes the replacement atomically. An already-open reader retains the old complete file. Failure before publication leaves the old record intact. A sync or unlock error after publication does not prove the update was rolled back; callers must reload the record rather than assume its contents.
+
+The filesystem lock serializes Create and Update across cooperating store handles and processes. Its filename remains `.create.lock` so existing handles share the same lock. Lock waits observe context cancellation. Other filesystem calls check cancellation between operations; context does not interrupt a blocked filesystem syscall. This is not the later per-session lock needed around container exec, stop, and remove.
 
 ## Boundaries still to implement
 
-- Record updates, listing, and identity release/removal.
+- Identity release/removal.
 - Resource ownership metadata and copy ownership records.
 - Default state-directory selection and explicit legacy-state compatibility.
 - Session lifecycle and per-session mutation locking.
