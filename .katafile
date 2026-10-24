@@ -1,0 +1,32 @@
+Learn idiomatic Go while building go-sesh, a working, tested replacement for pi-sesh. Use TypeScript as the reference for unchanged behavior, not as a structure to translate directly. Follow the updated plan's intentional replacement of Git clone workspaces with filesystem copy.
+
+Go learning goals:
+- Understand modules, packages, imports, and exported identifiers.
+- Use structs, methods, pointer receivers, slices, and interfaces naturally.
+- Handle errors with useful context, wrapping, errors.Is, and errors.As.
+- Understand io.Reader, io.Writer, resource ownership, and defer.
+- Run subprocesses with literal argv, explicit environments, bounded output, and context cancellation.
+- Use goroutines and synchronization only when the design needs them.
+- Write table-driven tests, use temporary directories and helper subprocesses, and test failure paths.
+- Use gofmt, go test, go vet, and the race detector when relevant.
+
+Session and container learning goals:
+- Distinguish host processes from container processes, host paths from container paths, and image builds from running containers.
+- Understand rootless Podman, UID/GID mapping, namespaces, capabilities, resource limits, and read-only filesystems.
+- Understand local images, network isolation, bind mounts, tmpfs, environment forwarding, and terminal attachment.
+- Follow session create, inspect, exec, stop, remove, list, and logs behavior.
+- Understand mounted and filesystem-copy workspaces, external source ownership, session-copy ownership, snapshots, writable owned directories, and secret lifetimes.
+- Distinguish directory preparation in go-sesh from Git acquisition in future sandboxd providers and publishing policy in integrations. Git inside a container remains an ordinary workload command.
+- Preserve trust boundaries, ownership checks, recovery records, rollback ordering, and fail-closed cleanup.
+- Keep lifecycle logic reusable and the CLI thin. Defer daemon orchestration until it is needed.
+
+Learning approach:
+- Build in small, tested steps that contribute to the working CLI.
+- Leave one useful, bounded function, test, or design choice for me to attempt during each coding step.
+- Explain the task, expected behavior, and relevant Go or container concepts before I attempt it.
+- Review my attempt and explain what works and what needs to change.
+- Use concise explanations. Explain language-specific details without assuming prior Go experience.
+- Put exercises in the normal source or test file where the finished code belongs. I complete them in the editor, not in chat.
+- Do not create kata-specific files or separate exercise copies. Use the project's normal programming and testing workflow.
+- Keep the repository buildable between steps. Use a short commented scaffold when necessary, then remove exercise-only guidance after review.
+- Take over an exercise when I ask. Do not trade security or correctness for teaching convenience.

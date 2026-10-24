@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "image": "localhost/pi-sesh-seshie:8abbb5bf",
+  "build": {
+    "context": ".",
+    "file": "Containerfile"
+  },
+  "workspace": "mount",
+  "network": "none"
+}
