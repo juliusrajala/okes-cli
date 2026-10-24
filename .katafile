@@ -22,7 +22,8 @@ Session and container learning goals:
 
 Learning approach:
 - Build in small, tested steps that contribute to the working CLI.
-- Leave one useful, bounded function, test, or design choice for me to attempt during each coding step.
+- Leave useful, bounded functions, tests, or design choices for me to attempt during each coding step. Favor core session and runtime logic, not only utilities or tests.
+- When requested, leave several connected functions across layers so I can understand how the codebase fits together.
 - Before implementation directions, explain the function's purpose, its place in the full call flow, its inputs and outputs, and its side effects or safety boundaries.
 - Put a normal Go function description above the exercise in its source file. Keep implementation directions separate so the description remains useful after the exercise.
 - Explain the expected behavior and relevant Go or container concepts before I attempt the function.
