@@ -67,4 +67,6 @@ Session ID parsing and validation, neutral runtime state validation, and stopped
 
 Workspace and network mode validation are implemented and tested, including explicit rejection of obsolete clone mode and unsupported network modes. No directory preparation or networking operations are implemented yet.
 
-Continue with the file-backed session store and runtime interface in small steps. Keep Git provisioning and orchestration outside these types and APIs.
+The first file-backed store slice creates name reservations and version-2 records, then loads records by ID or name after reopening. It validates private files, rejects legacy/unknown schemas, prevents identity overwrites, and serializes creation. Name-based resolution checks reservation/record agreement and preserves lookup errors. Updates, listing, removal, resource metadata, and general per-session locking remain pending. See [session store notes](session-store.md).
+
+Implement the remaining store operations, then define the runtime interface and connect the first mounted-session lifecycle. Keep Git provisioning and orchestration outside these types and APIs.

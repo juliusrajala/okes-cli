@@ -29,7 +29,7 @@ The approved changes below come from the [updated rewrite plan](pi-sesh-go-rewri
 - Define symlink handling, special-file handling, size and entry limits, and copied permissions.
 - Define behavior when the source changes during copying. The plan does not yet define an atomic snapshot guarantee.
 - Define cancellation, partial-copy rollback, and ownership records that protect source directories and replaced paths.
-- Decide which legacy TypeScript records Go can inspect or safely clean. Never reinterpret an old clone record as a new copy record.
+- The initial Go store uses version 2 and rejects TypeScript version-1 records. Broader legacy inspection or cleanup still needs an explicit compatibility path. Never reinterpret an old clone record as a new copy record.
 - Test copy behavior against its new filesystem contract. Use TypeScript for unchanged mount, resource, security, and lifecycle behavior.
 
 The remainder of this document is the TypeScript baseline, not a specification to reintroduce Git provisioning into Go.

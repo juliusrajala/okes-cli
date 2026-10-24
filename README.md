@@ -10,7 +10,9 @@ The default capture limit is 16 MiB per output stream. An omitted environment me
 
 Cancellation stops the direct host process. It does not prove that a container workload or descendant process has stopped. A supplied stdin reader must not block indefinitely.
 
-`internal/session` provides session ID parsing and validation. `internal/runtime` defines normalized container states and validates known state values. Neither package starts or inspects containers yet.
+`internal/session` provides session ID/name validation and a file-backed store. It can reserve a name, save a version-2 record, reopen the store, and load the record by ID or its case-sensitive name. See the [session store notes](docs/session-store.md) for safety rules and current limits.
+
+`internal/runtime` defines normalized container states and validates known state values. Neither package starts or inspects containers yet.
 
 `internal/workspace` validates the `mount` and `copy` mode names and rejects the removed `clone` mode. It does not prepare directories yet. `internal/runtime` also validates the supported network modes, `none` and `pasta`; it does not enable networking.
 
@@ -31,6 +33,12 @@ go test -race ./...
 ```
 
 Use `go test -v ./...` to show individual test results. Unit tests do not require Podman or network access.
+
+To exercise saving a session record and loading it after reopening the store:
+
+```sh
+go test -v ./internal/session -run '^TestStoreCreateReopenGet$'
+```
 
 ## References
 
