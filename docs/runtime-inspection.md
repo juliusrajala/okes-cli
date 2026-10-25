@@ -54,12 +54,13 @@ The adapter keeps unknown engine JSON fields compatible with Podman additions. I
 
 The future start path needs a local image check. `Client.ImageExists` validates its reference, preflights the host, and runs `image exists` through the existing invocation helper. Status 0 means present, status 1 means absent, and every other status or execution failure remains an error. This method never pulls an image.
 
-Image availability is not immutable image resolution. Resolving the image ID and creating a container with `--pull=never` remain later work.
+Image availability is not immutable image resolution. `Client.ImageID` validates the reference, preflights with network `none`, and runs `image inspect --format {{.Id}} IMAGE` through `checked`. Every nonzero status is an error. It passes stdout to `parseImageID`, which trims surrounding whitespace and removes one optional `sha256:` prefix. The parser requires exactly 64 hexadecimal characters, preserves case, and wraps `ErrInvalidResponse` on failure. This matches the TypeScript `imageId` method and returns an ID compatible with the existing record schema.
+
+Both functions are implemented and tested. They do not require a new runtime interface yet. Container creation with `--pull=never` remains later work.
 
 ## Still pending
 
-- Add image-ID resolution and container creation/start capabilities.
-- Add image-ID resolution and container creation/start capabilities.
+- Add container creation/start capabilities using the resolved immutable image ID.
 - Connect workspace preparation and the first mounted-session lifecycle.
 - Add resource-aware inspection cleanup when the resource model exists.
 - Add removal only with verified runtime absence and ownership checks.

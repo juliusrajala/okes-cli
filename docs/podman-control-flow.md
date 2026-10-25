@@ -2,7 +2,7 @@
 
 Use this guide beside the source. The trees show execution order, branches, and interface calls. They are a control-flow map, not one literal Go stack trace.
 
-Inspection and manager listing are implemented. `Client.ImageExists` is still a commented exercise. The CLI is not implemented yet, so there is no CLI entry point to follow.
+Inspection, manager listing, local image availability checks, and immutable image-ID resolution are implemented. The CLI is not implemented yet, so there is no CLI entry point to follow.
 
 ## Source reading order
 
@@ -16,6 +16,7 @@ Inspection and manager listing are implemented. `Client.ImageExists` is still a 
 | 6 | [podman/inspect.go](../internal/podman/inspect.go) | `Inspect`, `containerExists`, `parseInspection` |
 | 7 | [process/run.go](../internal/process/run.go) | `Run`, `exec.CommandContext`, `cmd.Run` |
 | 8 | [process/capture.go](../internal/process/capture.go) | `capture.Write` and output-limit cancellation |
+| 9 | [podman/image.go](../internal/podman/image.go) | `ImageExists`, `parseImageID`, `ImageID` |
 
 ## 1. Construct the client once
 
@@ -177,7 +178,7 @@ No shell interprets the argv. An ordinary nonzero program exit is a `process.Res
 | --- | --- | --- | --- |
 | `Client.checked` | Success | Error | Error |
 | `Client.containerExists` | Present | Absent | Error |
-| Planned `Client.ImageExists` | Present | Absent | Error |
+| `Client.ImageExists` | Present | Absent | Error |
 
 A context cancellation kills the direct host process. It does not prove that descendants or a future in-container exec workload stopped. Lifecycle code must verify those outcomes separately.
 
@@ -200,19 +201,48 @@ Reusing `Inspect` keeps the identity and error behavior in one place. It current
 
 With Podman wired in, each successful existing-container inspection runs three host commands: `info`, `container exists`, and `container inspect`. A verified missing container needs only the first two.
 
-## 7. Local image probe: unfinished path
+## 7. Local image probe and ID resolution
 
-Follow the description in [image.go](../internal/podman/image.go). The method body is still your exercise.
+Follow [image.go](../internal/podman/image.go). The availability probe is implemented:
 
 ```text
-Client.ImageExists(ctx, image)               [not implemented yet]
+Client.ImageExists(ctx, image)
   validateImageReference(image)
   Client.Preflight(ctx, NetworkNone)
   Client.invoke("image", "exists", image)
   interpret status 0 / 1 / error
 ```
 
-Use `invoke`, not `checked`, because image absence is an expected result. This path must not pull an image. Image-ID resolution and container creation remain separate future operations.
+It uses `invoke`, not `checked`, because image absence is an expected result.
+
+Immutable image resolution follows this path:
+
+```text
+Client.ImageID(ctx, image)
+  validateImageReference(image)
+  Client.Preflight(ctx, NetworkNone)
+  Client.checked("image", "inspect", "--format", "{{.Id}}", image)
+    execution failure or nonzero status -> return empty ID and error
+  parseImageID(stdout)
+    trim surrounding whitespace
+    remove one optional "sha256:" prefix
+    require exactly 64 hexadecimal characters; preserve case
+    invalid data -> return empty ID and ErrInvalidResponse
+  return immutable image ID
+```
+
+The parser handles data only. The method handles command ordering and propagates failures. `ImageID` does not need to call `ImageExists`; a failed inspection is already an error.
+
+Neither path pulls an image. A tag can be reassigned, so a later start must use the resolved immutable ID, not the original tag. Container creation remains future work.
+
+Run the parser and adapter tests separately while following the code:
+
+```sh
+go test -v ./internal/podman -run '^TestParseImageID$'
+go test -v ./internal/podman -run '^TestImageID$'
+```
+
+These tests are active. Parser tests cover both ID formats and malformed output. Adapter tests also cover exact argv, command failures, cancellation, and preflight rejection. They do not run a live Podman process.
 
 ## 8. What the tests replace
 
