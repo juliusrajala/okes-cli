@@ -7,6 +7,9 @@ var (
 	ErrOwnership = errors.New("container ownership does not match session")
 	// ErrInvalidInspection means runtime data cannot establish a supported state.
 	ErrInvalidInspection = errors.New("invalid runtime inspection")
+	// ErrInvalidState means an observed state does not permit an operation or
+	// does not confirm its required result. It does not prove container absence.
+	ErrInvalidState = errors.New("invalid container state for operation")
 )
 
 // Target identifies a container for a session operation. SessionID is an opaque

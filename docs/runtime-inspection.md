@@ -6,7 +6,7 @@ For a source-by-source call sequence, see the [Podman control-flow guide](podman
 
 The Podman adapter implements host preflight and verified container inspection. The manager's `Inspect` and `List` methods combine saved records with runtime observations and preserve errors without changing stored data. Their tests use fake inspectors. The adapter's `ImageExists` method checks local availability without pulling an image. Its tests use a fake process runner.
 
-No CLI, container creation, execution, stopping, or removal is implemented by this slice. Ordinary tests use fake process runners and do not require a live engine.
+Container-only `Client.Stop` and `Client.Remove` verify ownership and the required final state. No CLI, container creation, execution, or session-level stop/remove is implemented by this slice. Ordinary tests use fake process runners and do not require a live engine.
 
 ## Inspection call flow
 
@@ -58,10 +58,24 @@ Image availability is not immutable image resolution. `Client.ImageID` validates
 
 Both functions are implemented and tested. They do not require a new runtime interface yet. Container creation with `--pull=never` remains later work.
 
+## Container teardown
+
+`Client.Stop` and `Client.Remove` are implemented and tested with fake runners. The following contract distinguishes container-only operations from later session-level cleanup. `runtime.ErrInvalidState` identifies state refusals and unverified operation results.
+
+Both methods must call the existing verified `Inspect` path before changing a container. When a container is observed, they must copy its immutable ID into the local target before subsequent commands or inspections. The initial name lookup supports recovery; it must not remain the mutation selector.
+
+Stop refuses an initially missing or paused container. It requests a 10-second stop only for a running container, then inspects again. Exited, stopped, or missing is a successful final state. Created is not stopped. Other initially permitted states skip the stop command but still need the final inspection. On failure the method returns a zero inspection and an error.
+
+Remove refuses a running or paused container and never stops it implicitly. For a present container, it invokes `container rm`, then verifies absence twice. An invocation error stops the operation. A nonzero rm status alone neither proves success nor prevents success if the following inspections prove absence, as in TypeScript. If the container was initially missing, remove still performs one more inspection.
+
+These methods operate on containers only. They must not delete records, workspaces, or resources. A future session-level remove must serialize mutations and recheck absence before deleting owned host data. Neither a cancelled caller nor a successful mutation command alone establishes the final container state.
+
+The [control-flow guide](podman-control-flow.md#8-container-teardown) shows the implemented Stop and Remove paths.
+
 ## Still pending
 
 - Add container creation/start capabilities using the resolved immutable image ID.
 - Connect workspace preparation and the first mounted-session lifecycle.
 - Add resource-aware inspection cleanup when the resource model exists.
-- Add removal only with verified runtime absence and ownership checks.
+- Add session-level removal only with verified runtime absence and host-data ownership checks.
 - Add opt-in real Podman integration tests and the thin CLI.

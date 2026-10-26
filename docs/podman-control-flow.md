@@ -2,7 +2,7 @@
 
 Use this guide beside the source. The trees show execution order, branches, and interface calls. They are a control-flow map, not one literal Go stack trace.
 
-Inspection, manager listing, local image availability checks, and immutable image-ID resolution are implemented. The CLI is not implemented yet, so there is no CLI entry point to follow.
+Inspection, manager listing, local image availability checks, and immutable image-ID resolution are implemented. Container-only `Stop` and `Remove` are implemented. The CLI is not implemented yet, so there is no CLI entry point to follow.
 
 ## Source reading order
 
@@ -17,6 +17,7 @@ Inspection, manager listing, local image availability checks, and immutable imag
 | 7 | [process/run.go](../internal/process/run.go) | `Run`, `exec.CommandContext`, `cmd.Run` |
 | 8 | [process/capture.go](../internal/process/capture.go) | `capture.Write` and output-limit cancellation |
 | 9 | [podman/image.go](../internal/podman/image.go) | `ImageExists`, `parseImageID`, `ImageID` |
+| 10 | [podman/lifecycle.go](../internal/podman/lifecycle.go) | `Stop`, `Remove` |
 
 ## 1. Construct the client once
 
@@ -244,7 +245,71 @@ go test -v ./internal/podman -run '^TestImageID$'
 
 These tests are active. Parser tests cover both ID formats and malformed output. Adapter tests also cover exact argv, command failures, cancellation, and preflight rejection. They do not run a live Podman process.
 
-## 8. What the tests replace
+## 8. Container teardown
+
+`Client.Stop` and `Client.Remove` are implemented and tested with fake runners. These are container-only operations, not complete session lifecycle methods.
+
+### Stop
+
+```text
+Client.Stop(ctx, target)
+  Client.Inspect(ctx, target)
+    error -> return zero inspection and error
+  initially Missing or Paused -> ErrInvalidState
+  target.ContainerID = observed immutable container ID
+  if Running:
+    Client.checked("container", "stop", "--time", "10", ID)
+      error -> return zero inspection and error
+  Client.Inspect(ctx, pinnedTarget)
+    error -> return zero inspection and error
+  require Exited, Stopped, or Missing
+    other state -> ErrInvalidState
+  return the final verified inspection
+```
+
+A created container has not run, but `StoppedOrMissing` deliberately does not include it. Do not turn a created observation into a successful stop without the required final state. An already exited or stopped container still needs a second inspection.
+
+Run the Stop tests without a live engine:
+
+```sh
+go test -v ./internal/podman -run '^TestStop$'
+```
+
+### Remove
+
+```text
+Client.Remove(ctx, target)
+  Client.Inspect(ctx, target)
+    error -> return error
+  Running or Paused -> ErrInvalidState; do not stop implicitly
+  if present:
+    target.ContainerID = observed immutable container ID
+    Client.invoke("container", "rm", ID)
+      invocation error -> return error
+    Client.Inspect(ctx, pinnedTarget)
+      error -> return error
+      present -> ErrInvalidState
+  Client.Inspect(ctx, target)
+    use the pinned ID if one was observed
+    otherwise retain the original target for recovery lookup
+    error -> return error
+    present -> ErrInvalidState
+  return nil
+```
+
+Run the Remove tests without a live engine:
+
+```sh
+go test -v ./internal/podman -run '^TestRemove$'
+```
+
+`invoke` leaves rm's exit-status interpretation to this method. As in TypeScript, a nonzero status can be followed by verified absence. Do not treat that status as proof of absence. Do not ignore an invocation error. A zero status is also insufficient without the inspections.
+
+Both methods use a value copy of `runtime.Target`. Assigning `target.ContainerID` changes that local copy, not the stored record. Once an initial inspection establishes identity, use that immutable ID for every later command. A container name can be reused.
+
+These are adapter operations, not complete session stop/remove operations. They do not remove secrets or host files. Future session code must add mutation locking and verify absence again before deleting owned data. Cancellation after a mutation can prevent verification; return the error instead of reporting success.
+
+## 9. What the tests replace
 
 - [manager_test.go](../internal/session/manager_test.go) injects `inspectorFunc`. These tests stop at the runtime interface and do not invoke the Podman adapter.
 - [client_test.go](../internal/podman/client_test.go) provides `scriptClient` with a fake `Runner`. Adapter tests check the argv and return scripted engine output without starting Podman.
