@@ -18,6 +18,8 @@ go test -v ./internal/session -run '^TestStoreCreateReopenGet$'
 
 `Store.List(ctx)` loads every candidate through `Get` in filename order. It fails with a nil result on any error and leaves staging files and reservations untouched. It returns metadata, not live container state or an atomic multi-record snapshot.
 
+`Store.Delete(ctx, expected)` removes only a mount-session record whose saved facts still match the expected record and whose alias still points to that ID. The caller must hold the session lock and freshly verify container absence. Delete checks private files, ownership, and inode identity. It removes the record before the alias; an interrupted removal can leave an orphaned reservation for explicit recovery. Copy records are refused until owned-copy cleanup is implemented. It never deletes source directories.
+
 ## Record schema
 
 - Go records use version 2. TypeScript version 1 is rejected; there is no automatic migration or import.
@@ -34,6 +36,7 @@ go test -v ./internal/session -run '^TestStoreCreateReopenGet$'
 ```text
 <explicit store root>/
   .create.lock
+  .session-<session UUID>.lock
   sessions/<session UUID>.json
   names/<base64url name>.json
 ```
@@ -52,13 +55,14 @@ On an observed creation failure, the store releases its new reservation only if 
 
 Updates take the same lock, validate the current record and name binding, and stage a complete private replacement. A checked rename publishes the replacement atomically. An already-open reader retains the old complete file. Failure before publication leaves the old record intact. A sync or unlock error after publication does not prove the update was rolled back; callers must reload the record rather than assume its contents.
 
-The filesystem lock serializes Create and Update across cooperating store handles and processes. Its filename remains `.create.lock` so existing handles share the same lock. Lock waits observe context cancellation. Other filesystem calls check cancellation between operations; context does not interrupt a blocked filesystem syscall. This is not the later per-session lock needed around container exec, stop, and remove.
+The metadata lock serializes Create, Update, and Delete across cooperating store handles and processes. Its filename remains `.create.lock` so existing handles share the same lock. Manager Start/Stop/Remove also use `.session-<UUID>.lock` files. Lock order is session, then metadata. Session lock files remain after removal; deleting a lock file could allow two callers to lock different inodes for the same identity.
+
+Lock waits observe context cancellation and check lock-file identity after acquisition. Other filesystem calls check cancellation between operations; context does not interrupt a blocked filesystem syscall. Inspect and List do not acquire mutation locks.
 
 ## Boundaries still to implement
 
-- Identity release/removal.
 - Resource ownership metadata and copy ownership records.
 - Default state-directory selection and explicit legacy-state compatibility.
-- Session lifecycle and per-session mutation locking.
+- Resource-aware removal and safe release of owned copy workspaces.
 
-Metadata absence is never proof of container absence. No public deletion operation exists in this slice. Later lifecycle code must verify runtime ownership and absence before requesting record or resource removal.
+Metadata absence is never proof of container absence. The manager verifies runtime ownership and absence before requesting metadata removal. See the [mounted-session lifecycle](mounted-session.md) for startup ordering, cancellation recovery, and the current adapter limitations.

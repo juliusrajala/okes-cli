@@ -49,12 +49,22 @@ func (c *Client) Stop(ctx context.Context, target runtime.Target) (runtime.Inspe
 // An initially missing container still needs another absence check. A refused
 // state or a container that remains present wraps runtime.ErrInvalidState.
 func (c *Client) Remove(ctx context.Context, target runtime.Target) error {
+	return c.removeContainer(ctx, target, false)
+}
+
+// RollbackCreate force-removes only a verified session-owned container after a
+// failed startup. It is not normal session removal. Uncertainty preserves state.
+func (c *Client) RollbackCreate(ctx context.Context, target runtime.Target) error {
+	return c.removeContainer(ctx, target, true)
+}
+
+func (c *Client) removeContainer(ctx context.Context, target runtime.Target, rollback bool) error {
 	inspection, err := c.Inspect(ctx, target)
 	if err != nil {
 		return err
 	}
 
-	if inspection.State == runtime.Running || inspection.State == runtime.Paused {
+	if !rollback && (inspection.State == runtime.Running || inspection.State == runtime.Paused) {
 		return fmt.Errorf("%w: cannot remove a running or paused container", runtime.ErrInvalidState)
 	}
 
@@ -62,7 +72,12 @@ func (c *Client) Remove(ctx context.Context, target runtime.Target) error {
 		target.ContainerID = inspection.ContainerID
 		// As in the reference, a nonzero rm status can be followed by proven
 		// absence. Invocation errors still fail; exit status alone is not proof.
-		_, err := c.invoke(ctx, "container", "rm", target.ContainerID)
+		args := []string{"container", "rm"}
+		if rollback {
+			args = append(args, "--force")
+		}
+		args = append(args, target.ContainerID)
+		_, err := c.invoke(ctx, args...)
 		if err != nil {
 			return err
 		}

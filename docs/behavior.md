@@ -16,6 +16,10 @@ The approved changes below come from the [updated rewrite plan](pi-sesh-go-rewri
 - Reject obsolete `clone` configuration explicitly. Do not silently interpret it as `copy`.
 - Workspace preparation returns paths, mode, and ownership/cleanup metadata. Repository URLs, refs, and source revisions do not belong in the Go runtime API.
 
+### Mounted-path enforcement in Go
+
+The mounted-workspace path now rejects broad host roots, the host home directory, known credential and container-engine state trees, and the host runtime directory. The manager also rejects workspace overlap with private session state. This is stricter than the TypeScript canonical-directory check and enforces the documented no-home/no-credentials/no-socket mount boundary. Ordinary project directories below home remain supported. These checks do not claim protection against a hostile process running as the same host user.
+
 ### Git and control-plane boundary
 
 - go-sesh does not clone, fetch, select revisions, create branches, push, or create pull requests. It has no Git subprocess dependency for workspace preparation.

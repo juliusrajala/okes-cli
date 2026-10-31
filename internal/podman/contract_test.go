@@ -7,4 +7,4 @@ import (
 
 // Go checks interface compatibility by method signatures, without an implements
 // declaration. Keep the adapter independent of the session package in production.
-var _ session.Inspector = (*podman.Client)(nil)
+var _ session.Runtime = (*podman.Client)(nil)

@@ -286,7 +286,17 @@ func decodeStoreJSON(data []byte, value any) error {
 // Keep the existing filename so older store handles use the same lock. This is
 // not the per-session lock needed around container lifecycle operations.
 func (s *Store) lockMetadata(ctx context.Context) (func() error, error) {
-	file, err := s.root.OpenFile(".create.lock", os.O_RDWR|os.O_CREATE|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0o600)
+	return s.lockFile(ctx, ".create.lock")
+}
+
+func (s *Store) lockFile(ctx context.Context, path string) (func() error, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := s.checkDirectories(); err != nil {
+		return nil, err
+	}
+	file, err := s.root.OpenFile(path, os.O_RDWR|os.O_CREATE|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0o600)
 	if err != nil {
 		return nil, err
 	}
@@ -305,6 +315,16 @@ func (s *Store) lockMetadata(ctx context.Context) (func() error, error) {
 		}
 		err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
 		if err == nil {
+			current, statErr := s.root.Lstat(path)
+			if statErr == nil {
+				statErr = checkStoreInfo(current, false)
+			}
+			if statErr == nil && !os.SameFile(current, info) {
+				statErr = fmt.Errorf("%w: lock file identity changed", ErrUnsafeStore)
+			}
+			if statErr != nil {
+				return nil, errors.Join(statErr, syscall.Flock(int(file.Fd()), syscall.LOCK_UN), file.Close())
+			}
 			return func() error {
 				return errors.Join(syscall.Flock(int(file.Fd()), syscall.LOCK_UN), file.Close())
 			}, nil

@@ -2,9 +2,9 @@
 
 ## Current implementation
 
-`runtime.CreateRequest` describes the inputs to a future container creation operation. `podman.validateCreateRequest` validates those inputs without accessing the filesystem or engine. It returns sorted custom container environment entries through `podman.containerEnvironment`.
+`runtime.CreateRequest` describes the inputs to container creation. `podman.validateCreateRequest` validates those inputs without accessing the filesystem or engine. It returns sorted custom container environment entries through `podman.containerEnvironment`.
 
-`buildCreateArgs` composes identity, fixed policy, workspace, environment, terminal, and workload sections through small pure helpers. `parseContainerID` validates create stdout. Request validation, complete argv construction, individual sections, and output parsing are implemented and tested. Container creation and start invocation are not implemented yet, so these helpers do not provide a working session start.
+`buildCreateArgs` composes identity, fixed policy, workspace, environment, terminal, and workload sections through small pure helpers. `parseContainerID` validates create stdout. Request validation, complete argv construction, individual sections, and output parsing are implemented and tested. Concrete Podman creation and detached start invocation are implemented and tested with fake process runners. The surrounding manager lifecycle is tested with a fake runtime. The gated real Podman smoke test passed on local rootless Podman 6.1.4 with the dedicated `localhost/go-sesh-smoke:1` image.
 
 Sources:
 
@@ -91,8 +91,8 @@ The fixed policy preserves the reference behavior:
 
 ## Requirements before live creation
 
-The later invocation path must preflight the local rootless engine with the requested network mode. It must resolve the selected local image without pulling. It must validate the actual workspace and save a pending recovery record before attempting creation.
+`Manager.Start` preflights the requested network, resolves the local image, prepares the canonical workspace directory, and saves a pending recovery record before requesting creation. `prepareCreate` validates inputs, rechecks that the workspace still resolves to the recorded path, and constructs argv with trusted host UID/GID and preflight SELinux state. It refuses live copy creation until copy ownership exists.
 
 A failed create command does not prove that no container was created. Recovery must use the reserved session name and ownership labels when an ID is unavailable. Later cleanup must verify ownership and absence before removing owned host data. Neither successful input validation nor parsed output alone establishes runtime ownership.
 
-Create/start invocation, recovery orchestration, session mutation locking, workspace preparation, resources, and the CLI remain outside this slice.
+Recovery orchestration, mutation locking, metadata deletion, and mounted-workspace preparation are implemented by the [mounted-session lifecycle](mounted-session.md). `Client.Create` now executes prepared argv and validates its returned ID. `Client.StartDetached` verifies a created container, pins its ID, starts it, and returns a fresh non-missing observation. Invocation failures remain errors for the manager's recovery path. Resources, copy provisioning, and the CLI remain pending.

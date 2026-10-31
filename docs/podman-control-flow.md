@@ -2,7 +2,7 @@
 
 Use this guide beside the source. The trees show execution order, branches, and interface calls. They are a control-flow map, not one literal Go stack trace.
 
-Inspection, manager listing, local image availability checks, and immutable image-ID resolution are implemented. Container-only `Stop` and `Remove` are implemented. Creation-request validation, secure argv construction, and create-output parsing are implemented. Create/start invocation remains pending. The CLI is not implemented yet, so there is no CLI entry point to follow.
+Inspection, manager listing, local image availability checks, and immutable image-ID resolution are implemented. Container-only `Stop` and `Remove` are implemented. Creation-request validation, secure argv construction, and create-output parsing are implemented. The manager's mounted-session lifecycle is implemented and tested with a fake runtime. Concrete Podman Create/StartDetached are implemented, and the approved live mounted-session smoke test passed on rootless Podman 6.1.4. The CLI is not implemented yet, so there is no CLI entry point to follow.
 
 ## Source reading order
 
@@ -21,6 +21,11 @@ Inspection, manager listing, local image availability checks, and immutable imag
 | 11 | [runtime/create.go](../internal/runtime/create.go) | `CreateRequest` |
 | 12 | [podman/create_validate.go](../internal/podman/create_validate.go) | `validateCreateRequest`, `containerEnvironment` |
 | 13 | [podman/create.go](../internal/podman/create.go) | `buildCreateArgs`, section helpers, `parseContainerID` |
+| 14 | [session/start.go](../internal/session/start.go) | `Start`, `startMounted`, `rollbackStart` |
+| 15 | [session/lifecycle.go](../internal/session/lifecycle.go) | Manager `Stop`, `Remove`, `verifyAbsent` |
+| 16 | [session/store_lifecycle.go](../internal/session/store_lifecycle.go) | `withSessionLock`, `Delete` |
+| 17 | [podman/run.go](../internal/podman/run.go) | `prepareCreate`, `Create`, `StartDetached` |
+| 18 | [workspace/mount.go](../internal/workspace/mount.go) | `PrepareMount`, mount boundary checks |
 
 ## 1. Construct the client once
 
@@ -48,7 +53,7 @@ podman.New(options)
 
 `New` prepares data. It does not run Podman or check the engine's capabilities.
 
-The caller can place this `*podman.Client` in `Manager.Runtime`. The client satisfies the `session.Inspector` interface because its method signature matches. Go needs no `implements` declaration.
+The client satisfies the complete `session.Runtime` contract, including the read-only `Inspector` capability. A compile-time assertion checks its method signatures. Go needs no `implements` declaration.
 
 The host environment belongs to the Podman subprocess. It is not a container environment or a host-home mount.
 
@@ -310,7 +315,7 @@ go test -v ./internal/podman -run '^TestRemove$'
 
 Both methods use a value copy of `runtime.Target`. Assigning `target.ContainerID` changes that local copy, not the stored record. Once an initial inspection establishes identity, use that immutable ID for every later command. A container name can be reused.
 
-These are adapter operations, not complete session stop/remove operations. They do not remove secrets or host files. Future session code must add mutation locking and verify absence again before deleting owned data. Cancellation after a mutation can prevent verification; return the error instead of reporting success.
+These adapter operations do not remove secrets or host files. The manager now adds mutation locking and verifies absence again before deleting matching mount-session metadata. Cancellation after a mutation can prevent verification; return the error instead of reporting success.
 
 ## 9. Creation requests and argv
 
@@ -351,7 +356,7 @@ parseContainerID(create stdout)
   return lowercase container ID
 ```
 
-The workload section stays last. Argument construction and output parsing are complete; neither function runs Podman. Create/start invocation and recovery ordering remain later work.
+The workload section stays last. Argument construction and output parsing are complete; neither function runs Podman. Recovery ordering is implemented by the manager. The concrete Podman Create/StartDetached methods use this argv and verified inspection for invocation.
 
 Run validation and argv tests without an engine:
 
@@ -362,7 +367,62 @@ go test -v ./internal/podman -run '^(TestBuildCreateArgs|TestParseContainerID|Te
 
 See the [container creation boundary](container-creation.md) for the request fields, fixed policy, and prerequisites before a real create operation.
 
-## 10. What the tests replace
+## 10. Mounted-session workflow
+
+The manager flow is implemented and tested with a fake runtime. Adapter invocation is implemented and tested with fake process runners. This is the complete call sequence:
+
+```text
+Manager.Start(request)
+  validateStartRequest
+  workspace.PrepareMount -> canonical existing directory and path boundary checks
+  refuse workspace overlap with private store state
+  Runtime.Preflight(network)
+  Runtime.ImageID(image reference)
+  newID -> UUID and pending Record
+  Store.withSessionLock(ID)
+    Store.Create(record and alias)
+    Runtime.Create(request)
+      prepareCreate -> checked(create argv) -> parseContainerID
+    Store.Update(bound container ID)
+    Runtime.StartDetached(target)
+      Inspect Created -> checked(start) -> Inspect non-missing state
+    checkObservation and caller context
+    return View{Record, Inspection}
+
+  on failure after record publication:
+    rollbackStart(fresh bounded cleanup context, while session lock is held)
+      verify recovery record still matches the attempt
+      Runtime.RollbackCreate(target)
+        Inspect ownership -> rm --force immutable ID -> verify absence
+      verifyAbsent -> independent inspection
+      Store.Delete(matching saved record and alias)
+    uncertain rollback -> StartError with RecoveryRequired
+
+Manager.Stop(ID)
+  Store.withSessionLock(ID)
+    Store.Get(ID)
+    Runtime.Stop(targetForRecord(record))
+    checkObservation -> require stopped/exited/missing
+    return View
+
+Manager.Remove(ID)
+  Store.withSessionLock(ID)
+    Store.Get(ID) -> refuse copy records
+    Runtime.Remove(targetForRecord(record))
+    verifyAbsent -> require Missing
+    Store.Delete(expected record)
+      metadata lock -> check record and alias -> unlink record -> unlink alias
+```
+
+Session lock files remain after removal. Metadata deletion never removes the supplied source directory. Inspect/List remain read-only and do not acquire mutation locks. Startup rollback is the only lifecycle path permitted to force-remove a verified owned live container.
+
+```sh
+go test -v ./internal/session -run '^TestMountedSessionWorkflow$'
+```
+
+See the [mounted-session lifecycle](mounted-session.md) for API scope, failure handling, and the gated live test.
+
+## 11. What the tests replace
 
 - [manager_test.go](../internal/session/manager_test.go) injects `inspectorFunc`. These tests stop at the runtime interface and do not invoke the Podman adapter.
 - [client_test.go](../internal/podman/client_test.go) provides `scriptClient` with a fake `Runner`. Adapter tests check the argv and return scripted engine output without starting Podman.

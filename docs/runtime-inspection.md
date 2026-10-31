@@ -6,7 +6,7 @@ For a source-by-source call sequence, see the [Podman control-flow guide](podman
 
 The Podman adapter implements host preflight and verified container inspection. The manager's `Inspect` and `List` methods combine saved records with runtime observations and preserve errors without changing stored data. Their tests use fake inspectors. The adapter's `ImageExists` method checks local availability without pulling an image. Its tests use a fake process runner.
 
-Container-only `Client.Stop` and `Client.Remove` verify ownership and the required final state. No CLI, container creation, execution, or session-level stop/remove is implemented by this slice. Ordinary tests use fake process runners and do not require a live engine.
+Container-only `Client.Stop` and `Client.Remove` verify ownership and the required final state. `Manager.Start`, `Stop`, and `Remove` now coordinate the mounted-session lifecycle with locks, durable recovery metadata, and safe rollback. The full workflow is tested with a fake runtime. Concrete Podman `Create` and `StartDetached` are implemented and tested with fake process runners. The approved live mounted-session test passed on rootless Podman 6.1.4. No CLI is available yet. See the [mounted-session lifecycle](mounted-session.md).
 
 ## Inspection call flow
 
@@ -25,7 +25,7 @@ Manager.List()
   Manager.Inspect() for each saved session
 ```
 
-The manager consumes the small `session.Inspector` interface. Go matches implementations by their method signatures. `podman.Client` does not import the session package in production. The compile-time assertion in `internal/podman/contract_test.go` checks that it satisfies this interface.
+The manager consumes `session.Runtime`, which embeds the read-only `session.Inspector` capability and the operations needed by the current lifecycle. Go matches implementations by method signatures. `podman.Client` does not import the session package in production. The compile-time assertion in `internal/podman/contract_test.go` checks the complete `Runtime` capability.
 
 `internal/runtime` owns neutral request and result types. Podman flags, JSON structs, and existence-command status interpretation remain inside `internal/podman`. We will add further runtime capabilities when their lifecycle consumers are implemented.
 
@@ -52,11 +52,11 @@ The adapter keeps unknown engine JSON fields compatible with Podman additions. I
 
 ## Local image probe
 
-The future start path needs a local image check. `Client.ImageExists` validates its reference, preflights the host, and runs `image exists` through the existing invocation helper. Status 0 means present, status 1 means absent, and every other status or execution failure remains an error. This method never pulls an image.
+The start path needs a local image check. `Client.ImageExists` validates its reference, preflights the host, and runs `image exists` through the existing invocation helper. Status 0 means present, status 1 means absent, and every other status or execution failure remains an error. This method never pulls an image.
 
 Image availability is not immutable image resolution. `Client.ImageID` validates the reference, preflights with network `none`, and runs `image inspect --format {{.Id}} IMAGE` through `checked`. Every nonzero status is an error. It passes stdout to `parseImageID`, which trims surrounding whitespace and removes one optional `sha256:` prefix. The parser requires exactly 64 hexadecimal characters, preserves case, and wraps `ErrInvalidResponse` on failure. This matches the TypeScript `imageId` method and returns an ID compatible with the existing record schema.
 
-Both functions are implemented and tested. They do not require a new runtime interface yet. Container creation with `--pull=never` remains later work.
+Both functions are implemented and tested. `session.Runtime` consumes `ImageID` for startup; inspecting a local image resolves its ID without a pull. Concrete container creation uses the resolved ID with `--pull=never`.
 
 ## Container teardown
 
@@ -68,7 +68,9 @@ Stop refuses an initially missing or paused container. It requests a 10-second s
 
 Remove refuses a running or paused container and never stops it implicitly. For a present container, it invokes `container rm`, then verifies absence twice. An invocation error stops the operation. A nonzero rm status alone neither proves success nor prevents success if the following inspections prove absence, as in TypeScript. If the container was initially missing, remove still performs one more inspection.
 
-These methods operate on containers only. They must not delete records, workspaces, or resources. A future session-level remove must serialize mutations and recheck absence before deleting owned host data. Neither a cancelled caller nor a successful mutation command alone establishes the final container state.
+These methods operate on containers only. They must not delete records, workspaces, or resources. The manager now serializes mutations and rechecks absence before deleting matching mount-session metadata. Neither a cancelled caller nor a successful mutation command alone establishes the final container state.
+
+`Client.RollbackCreate` is a separate startup-only operation. It verifies ownership before force removal and verifies absence afterward. Normal Remove retains its refusal to stop/remove live containers implicitly.
 
 The [control-flow guide](podman-control-flow.md#8-container-teardown) shows the implemented Stop and Remove paths.
 
@@ -76,12 +78,11 @@ The [control-flow guide](podman-control-flow.md#8-container-teardown) shows the 
 
 `runtime.CreateRequest` and pure request/environment validation are implemented. They describe prepared host workspace paths, immutable image IDs, literal container argv, explicit environment values, network/workspace modes, and terminal selection. Trusted host UID/GID and SELinux/terminal values stay separate from project input.
 
-Secure argv construction and create-output parsing are implemented and tested. `buildCreateArgs` validates once, then composes identity, policy, workspace, environment, terminal, and workload sections. `parseContainerID` normalizes valid output and rejects the pending marker. Create/start invocation remains unimplemented. These pure functions do not resolve filesystem paths, establish workspace ownership, or save recovery metadata. See the [container creation boundary](container-creation.md) for the validation contract and prerequisites before live creation.
+Secure argv construction and create-output parsing are implemented and tested. `buildCreateArgs` validates once, then composes identity, policy, workspace, environment, terminal, and workload sections. `parseContainerID` normalizes valid output and rejects the pending marker. `Client.Create` and `Client.StartDetached` now implement invocation through the existing checked runner and verified inspection paths. The pure argv builder and parser do not resolve filesystem paths, establish workspace ownership, or save recovery metadata. The manager prepares the mounted path and saves recovery metadata; `prepareCreate` also rechecks the canonical path before engine creation. See the [container creation boundary](container-creation.md) for the validation contract and prerequisites before live creation.
 
 ## Still pending
 
-- Add container creation/start capabilities using the resolved immutable image ID.
-- Connect workspace preparation and the first mounted-session lifecycle.
 - Add resource-aware inspection cleanup when the resource model exists.
-- Add session-level removal only with verified runtime absence and host-data ownership checks.
-- Add opt-in real Podman integration tests and the thin CLI.
+- Extend safe session removal to owned copy workspaces and resources.
+- Extend opt-in live coverage beyond the verified mounted-session smoke test.
+- Add the thin CLI.

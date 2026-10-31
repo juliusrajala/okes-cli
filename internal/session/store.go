@@ -24,8 +24,8 @@ var (
 
 // Store persists session metadata in an explicitly selected private directory.
 // Create reserves identities but does not create containers or own workspaces.
-// Call Close to release its directory handles. Create and Update share a metadata
-// lock. Container lifecycle locking and metadata removal are not implemented.
+// Call Close to release its directory handles. Create, Update, and Delete share
+// a metadata lock. Manager mutations also hold a stable per-session lock.
 type Store struct {
 	root     *os.Root
 	sessions *os.Root

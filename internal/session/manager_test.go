@@ -14,7 +14,7 @@ func (f inspectorFunc) Inspect(ctx context.Context, target runtime.Target) (runt
 	return f(ctx, target)
 }
 
-func savedManager(t *testing.T, record Record, inspector Inspector) *Manager {
+func savedManager(t *testing.T, record Record, inspector Runtime) *Manager {
 	t.Helper()
 	store := testStore(t, t.TempDir())
 	createRecord(t, store, record)

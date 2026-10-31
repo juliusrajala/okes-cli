@@ -6,7 +6,7 @@ import (
 	"go-sesh/internal/runtime"
 )
 
-// Inspector is the runtime capability this manager currently consumes. The
+// Inspector is the runtime's read-only container observation capability. The
 // implementation must verify engine policy, container identity, and ownership
 // before returning a state. Podman satisfies this interface without importing
 // this package. Tests can supply another implementation with the same method.
@@ -18,7 +18,7 @@ type Inspector interface {
 // with a non-nil Store and Runtime. It owns no CLI, JSON rendering, or scheduling.
 type Manager struct {
 	Store   *Store
-	Runtime Inspector
+	Runtime Runtime
 }
 
 // View keeps persisted facts separate from the runtime's current observation.
@@ -39,18 +39,7 @@ func (m *Manager) Inspect(ctx context.Context, id ID) (View, error) {
 		return View{}, err
 	}
 
-	containerID := ""
-	if record.ContainerID != PendingContainerID {
-		containerID = record.ContainerID
-	}
-
-	runtimeTarget := runtime.Target{
-		SessionID:     string(record.ID),
-		ContainerID:   containerID,
-		ContainerName: record.ContainerName,
-	}
-
-	inspection, err := m.Runtime.Inspect(ctx, runtimeTarget)
+	inspection, err := m.Runtime.Inspect(ctx, targetForRecord(record))
 	if err != nil {
 		return View{}, err
 	}
