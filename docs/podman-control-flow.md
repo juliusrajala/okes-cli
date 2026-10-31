@@ -2,7 +2,7 @@
 
 Use this guide beside the source. The trees show execution order, branches, and interface calls. They are a control-flow map, not one literal Go stack trace.
 
-Inspection, manager listing, local image availability checks, and immutable image-ID resolution are implemented. Container-only `Stop` and `Remove` are implemented. The CLI is not implemented yet, so there is no CLI entry point to follow.
+Inspection, manager listing, local image availability checks, and immutable image-ID resolution are implemented. Container-only `Stop` and `Remove` are implemented. Creation-request validation, secure argv construction, and create-output parsing are implemented. Create/start invocation remains pending. The CLI is not implemented yet, so there is no CLI entry point to follow.
 
 ## Source reading order
 
@@ -18,6 +18,9 @@ Inspection, manager listing, local image availability checks, and immutable imag
 | 8 | [process/capture.go](../internal/process/capture.go) | `capture.Write` and output-limit cancellation |
 | 9 | [podman/image.go](../internal/podman/image.go) | `ImageExists`, `parseImageID`, `ImageID` |
 | 10 | [podman/lifecycle.go](../internal/podman/lifecycle.go) | `Stop`, `Remove` |
+| 11 | [runtime/create.go](../internal/runtime/create.go) | `CreateRequest` |
+| 12 | [podman/create_validate.go](../internal/podman/create_validate.go) | `validateCreateRequest`, `containerEnvironment` |
+| 13 | [podman/create.go](../internal/podman/create.go) | `buildCreateArgs`, section helpers, `parseContainerID` |
 
 ## 1. Construct the client once
 
@@ -309,7 +312,57 @@ Both methods use a value copy of `runtime.Target`. Assigning `target.ContainerID
 
 These are adapter operations, not complete session stop/remove operations. They do not remove secrets or host files. Future session code must add mutation locking and verify absence again before deleting owned data. Cancellation after a mutation can prevent verification; return the error instead of reporting success.
 
-## 9. What the tests replace
+## 9. Creation requests and argv
+
+These helpers are implemented and do not run processes:
+
+```text
+validateCreateRequest(request, trustedHostSettings)
+  validateTarget(request.Target)
+  require an unbound container ID and a valid session alias
+  require an immutable image ID and clean absolute workspace path syntax
+  validate workspace/network modes and trusted UID/GID
+  validate nonempty literal workload argv
+  reject NUL in terminal values that will be forwarded for TTY
+  containerEnvironment(request.Environment)
+    enforce count, protected-name, single-line, and byte limits
+    return sorted literal KEY=value entries
+  return entries, or nil and an error
+```
+
+This does not inspect the actual workspace or image. [create.go](../internal/podman/create.go) composes small sections after validation. Every section returns its own argv slice:
+
+```text
+buildCreateArgs(request, host)
+  validateCreateRequest(request, host) -> sorted environment entries
+    error -> return nil argv and error
+  createIdentityArgs(request)
+  append createPolicyArgs(request.Network, host)
+  append createWorkspaceArgs(request.WorkspacePath, host.SELinuxEnabled)
+  append createEnvironmentArgs(request, validated environment entries)
+  append createTerminalArgs(request, host)
+  append createWorkloadArgs(request.Command, request.ImageID)
+  return complete argv
+
+parseContainerID(create stdout)
+  trim surrounding whitespace
+  require exactly 64 hexadecimal characters and reject the pending marker
+    invalid -> empty ID and ErrInvalidResponse
+  return lowercase container ID
+```
+
+The workload section stays last. Argument construction and output parsing are complete; neither function runs Podman. Create/start invocation and recovery ordering remain later work.
+
+Run validation and argv tests without an engine:
+
+```sh
+go test -v ./internal/podman -run '^(TestValidateCreateRequest|TestContainerEnvironment|TestContainerEnvironmentLimits)$'
+go test -v ./internal/podman -run '^(TestBuildCreateArgs|TestParseContainerID|TestCreate.*Args)$'
+```
+
+See the [container creation boundary](container-creation.md) for the request fields, fixed policy, and prerequisites before a real create operation.
+
+## 10. What the tests replace
 
 - [manager_test.go](../internal/session/manager_test.go) injects `inspectorFunc`. These tests stop at the runtime interface and do not invoke the Podman adapter.
 - [client_test.go](../internal/podman/client_test.go) provides `scriptClient` with a fake `Runner`. Adapter tests check the argv and return scripted engine output without starting Podman.

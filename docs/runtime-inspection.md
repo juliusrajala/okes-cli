@@ -72,6 +72,12 @@ These methods operate on containers only. They must not delete records, workspac
 
 The [control-flow guide](podman-control-flow.md#8-container-teardown) shows the implemented Stop and Remove paths.
 
+## Container creation inputs
+
+`runtime.CreateRequest` and pure request/environment validation are implemented. They describe prepared host workspace paths, immutable image IDs, literal container argv, explicit environment values, network/workspace modes, and terminal selection. Trusted host UID/GID and SELinux/terminal values stay separate from project input.
+
+Secure argv construction and create-output parsing are implemented and tested. `buildCreateArgs` validates once, then composes identity, policy, workspace, environment, terminal, and workload sections. `parseContainerID` normalizes valid output and rejects the pending marker. Create/start invocation remains unimplemented. These pure functions do not resolve filesystem paths, establish workspace ownership, or save recovery metadata. See the [container creation boundary](container-creation.md) for the validation contract and prerequisites before live creation.
+
 ## Still pending
 
 - Add container creation/start capabilities using the resolved immutable image ID.
