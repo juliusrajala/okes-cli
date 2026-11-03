@@ -6,7 +6,7 @@ For a source-by-source call sequence, see the [Podman control-flow guide](podman
 
 The Podman adapter implements host preflight and verified container inspection. The manager's `Inspect` and `List` methods combine saved records with runtime observations and preserve errors without changing stored data. Their tests use fake inspectors. The adapter's `ImageExists` method checks local availability without pulling an image. Its tests use a fake process runner.
 
-Container-only `Client.Stop` and `Client.Remove` verify ownership and the required final state. `Manager.Start`, `Stop`, and `Remove` now coordinate the mounted-session lifecycle with locks, durable recovery metadata, and safe rollback. The full workflow is tested with a fake runtime. Concrete Podman `Create` and `StartDetached` are implemented and tested with fake process runners. The approved live mounted-session test passed on rootless Podman 6.1.4. No CLI is available yet. See the [mounted-session lifecycle](mounted-session.md).
+Container-only `Client.Stop` and `Client.Remove` verify ownership and the required final state. `Manager.Start`, `Stop`, and `Remove` now coordinate the mounted-session lifecycle with locks, durable recovery metadata, and safe rollback. The full workflow is tested with a fake runtime. Concrete Podman `Create` and `StartDetached` are implemented and tested with fake process runners. The approved live mounted-session test passed on rootless Podman 6.1.4. The thin `sesh` CLI now exposes the mounted lifecycle and passed its own live smoke test. See the [mounted-session lifecycle](mounted-session.md).
 
 ## Inspection call flow
 
@@ -85,4 +85,4 @@ Secure argv construction and create-output parsing are implemented and tested. `
 - Add resource-aware inspection cleanup when the resource model exists.
 - Extend safe session removal to owned copy workspaces and resources.
 - Extend opt-in live coverage beyond the verified mounted-session smoke test.
-- Add the thin CLI.
+- Extend the CLI beyond the implemented detached mounted-session commands.

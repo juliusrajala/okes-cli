@@ -75,4 +75,6 @@ Immutable image resolution is implemented by `Client.ImageID` and `parseImageID`
 
 The manager's detached mount workflow now implements Start/Inspect/Stop/Remove with per-session locks, pending recovery records before create, container-ID binding before start, and bounded verified startup rollback. Fake-runtime tests exercise the full flow and failure paths. The Podman Create and StartDetached methods are implemented and tested with fake process runners. The complete adapter contract is checked at compile time. The approved opt-in live mounted-session test passed on rootless Podman 6.1.4 with `localhost/go-sesh-smoke:1`. It verified workspace writes, stop/removal, source preservation, and test-state cleanup. See the [mounted-session lifecycle](mounted-session.md).
 
-Add the minimal CLI for the verified mounted-session path. Keep Git provisioning and orchestration outside these types and APIs.
+The minimal `sesh` CLI now exposes start/inspect/list/stop/remove for detached mounted sessions, with JSON output, explicit literal argv, and a separate default `go-sesh` state directory. The built CLI passed a live smoke workflow with source preservation and unchanged existing session IDs. The module, record schema, and ownership labels remain unchanged. See the [CLI contract](cli.md).
+
+Next work extends this usable path toward exec/logs, configuration, copy workspaces, and resources. These remain separate features, not completed CLI parity. Keep Git provisioning and orchestration outside these types and APIs.

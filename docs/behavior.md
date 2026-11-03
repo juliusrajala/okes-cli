@@ -28,6 +28,14 @@ The mounted-workspace path now rejects broad host roots, the host home directory
 - The orchestrator or integration owns branch/publish policy, push authorization, GitHub APIs, and pull requests.
 - Workloads can still run Git inside the container through ordinary command execution. The session runtime does not interpret their Git semantics or automatically supply network access or credentials.
 
+### Initial Go CLI
+
+The Go executable is named `sesh`. The module remains `go-sesh`. Its default state directory is `$XDG_DATA_HOME/go-sesh`, or `$HOME/.local/share/go-sesh`, rather than TypeScript's pi-sesh directory. `--state-dir` explicitly selects another directory. Go does not import or migrate legacy records. Existing container names and ownership labels remain unchanged.
+
+The first CLI supports start/inspect/list/stop/remove for detached mounted sessions. Start requires `--detach`, `--name`, an explicit local image, a directory, and literal argv after `--`. It does not load project configuration or provide attached/TTY, copy, resources, exec/logs, presets, or build behavior. Unsupported flags and commands fail rather than silently changing their meaning.
+
+Positional session selectors are names; `--id UUID` explicitly selects immutable identity. Inspect always returns JSON, and other commands support `--json`. The CLI uses plain text for human summaries and lists; it does not port TypeScript's terminal color behavior. Flags precede positional operands. See the [CLI contract](cli.md) for syntax, JSON fields, and exit statuses.
+
 ### Decisions required before copy implementation
 
 - Define symlink handling, special-file handling, size and entry limits, and copied permissions.

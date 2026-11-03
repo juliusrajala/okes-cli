@@ -2,12 +2,13 @@
 
 Use this guide beside the source. The trees show execution order, branches, and interface calls. They are a control-flow map, not one literal Go stack trace.
 
-Inspection, manager listing, local image availability checks, and immutable image-ID resolution are implemented. Container-only `Stop` and `Remove` are implemented. Creation-request validation, secure argv construction, and create-output parsing are implemented. The manager's mounted-session lifecycle is implemented and tested with a fake runtime. Concrete Podman Create/StartDetached are implemented, and the approved live mounted-session smoke test passed on rootless Podman 6.1.4. The CLI is not implemented yet, so there is no CLI entry point to follow.
+Inspection, manager listing, local image availability checks, and immutable image-ID resolution are implemented. Container-only `Stop` and `Remove` are implemented. Creation-request validation, secure argv construction, and create-output parsing are implemented. The manager's mounted-session lifecycle is implemented and tested with a fake runtime. Concrete Podman Create/StartDetached are implemented, and the approved live mounted-session smoke test passed on rootless Podman 6.1.4. The `sesh` CLI now exposes this workflow. See the [CLI contract](cli.md) for flags and output.
 
 ## Source reading order
 
 | Step | Source | Look for |
 | --- | --- | --- |
+| CLI | [cmd/sesh/main.go](../cmd/sesh/main.go), [cli/run.go](../internal/cli/run.go) | Process setup, parsing, dispatch, and backend closure |
 | 1 | [session/manager.go](../internal/session/manager.go) | `Manager`, `Inspector`, `View`, `Inspect`, `List` |
 | 2 | [runtime/inspection.go](../internal/runtime/inspection.go) | `Target`, `Inspection`, `HostInfo` |
 | 3 | [podman/client.go](../internal/podman/client.go) | `New`, `invoke`, `checked` |
@@ -26,6 +27,23 @@ Inspection, manager listing, local image availability checks, and immutable imag
 | 16 | [session/store_lifecycle.go](../internal/session/store_lifecycle.go) | `withSessionLock`, `Delete` |
 | 17 | [podman/run.go](../internal/podman/run.go) | `prepareCreate`, `Create`, `StartDetached` |
 | 18 | [workspace/mount.go](../internal/workspace/mount.go) | `PrepareMount`, mount boundary checks |
+
+## CLI entry point
+
+```text
+cmd/sesh.main
+  signal context, explicit environment, stdin-independent writers
+  cli.Run(argv)
+    parse -> help/usage returns without Podman or state
+    resolve cwd and separate go-sesh state directory
+    startup Open factory -> podman.New + session.OpenStore
+    dispatch to Manager
+      names -> Store.Resolve -> immutable ID before mutation
+      --id UUID -> explicit immutable identity
+    render through io.Writer -> close store -> exit status
+```
+
+The CLI does not build Podman argv or implement recovery. Workload argv after `--` remains literal. Project configuration is not loaded by the initial command set.
 
 ## 1. Construct the client once
 

@@ -4,7 +4,7 @@
 
 The session manager implements Start, Inspect, List, Stop, and Remove for detached mounted sessions without resources. Tests run the complete lifecycle with a fake engine and real private metadata files. Workspace validation, per-session locking, metadata deletion, and startup recovery are implemented.
 
-The concrete Podman adapter implements `Client.Create` and `Client.StartDetached`. A compile-time assertion checks the complete `session.Runtime` interface. The approved live integration test passed on rootless Podman 6.1.4 using `localhost/go-sesh-smoke:1`. No CLI, copy provisioning, resource staging, exec, logs, or terminal attachment is implemented by this path.
+The concrete Podman adapter implements `Client.Create` and `Client.StartDetached`. A compile-time assertion checks the complete `session.Runtime` interface. The approved live integration test passed on rootless Podman 6.1.4 using `localhost/go-sesh-smoke:1`. The thin `sesh` CLI exposes this path and passed an approved live workflow. Copy provisioning, resource staging, exec, logs, and terminal attachment remain unimplemented. See the [CLI contract](cli.md).
 
 ## API and ownership
 

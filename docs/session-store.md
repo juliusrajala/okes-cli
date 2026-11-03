@@ -62,7 +62,7 @@ Lock waits observe context cancellation and check lock-file identity after acqui
 ## Boundaries still to implement
 
 - Resource ownership metadata and copy ownership records.
-- Default state-directory selection and explicit legacy-state compatibility.
+- Explicit legacy-state import/compatibility. The CLI already selects a separate default `go-sesh` state directory.
 - Resource-aware removal and safe release of owned copy workspaces.
 
 Metadata absence is never proof of container absence. The manager verifies runtime ownership and absence before requesting metadata removal. See the [mounted-session lifecycle](mounted-session.md) for startup ordering, cancellation recovery, and the current adapter limitations.

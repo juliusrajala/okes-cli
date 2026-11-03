@@ -20,12 +20,22 @@ Session and container learning goals:
 - Preserve trust boundaries, ownership checks, recovery records, rollback ordering, and fail-closed cleanup.
 - Keep lifecycle logic reusable and the CLI thin. Defer daemon orchestration until it is needed.
 
+Learning history and progression:
+- We have already covered basic functions, value and pointer receivers, address-taking, slices and append, if initializers, explicit error checks and wrapping, lifecycle wrappers, and table-driven tests. Covered does not mean mastered, but these are not new learning topics.
+- Do not repeat those patterns as the main exercise unless I ask for review or the task adds a clearly different concept.
+- Next exercises should introduce new reasoning in production code, such as data or stream handling, algorithms, resource ownership, API design, or state and recovery decisions.
+- Do not add complexity, abstractions, or concurrency merely to make an exercise seem advanced.
+
 Learning approach:
-- Build in small, tested steps that contribute to the working CLI.
-- Leave useful, bounded functions, tests, or design choices for me to attempt during each coding step. Favor core session and runtime logic, not only utilities or tests.
+- Build tested, end-to-end features that make the CLI more usable. Keep prerequisite work inside the agreed scope instead of repeatedly introducing new intermediate milestones.
+- Default to leaving two useful, bounded production functions for me during each coding step.
+- Before implementing the feature, agree with me on the two functions, the behavior or design decisions I own, and the new concepts each function introduces.
+- Leave meaningful production logic and design work for me. Do not implement the interesting parts first and then substitute tests, utilities, or repetitive lifecycle/error-handling wrappers as my contribution.
+- Write the surrounding tests and supporting code yourself unless I explicitly choose testing as the learning focus. Do not assign tests merely because they will not block delivery.
 - When requested, leave several connected functions across layers so I can understand how the codebase fits together.
 - Before implementation directions, explain the function's purpose, its place in the full call flow, its inputs and outputs, and its side effects or safety boundaries.
 - Put a normal Go function description above the exercise in its source file. Keep implementation directions separate so the description remains useful after the exercise.
+- Keep exercise instructions in source comments and chat, not in the README or product documentation.
 - Explain the expected behavior and relevant Go or container concepts before I attempt the function.
 - Review my attempt and explain what works and what needs to change.
 - Use concise explanations. Explain language-specific details without assuming prior Go experience.

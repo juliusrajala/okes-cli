@@ -1,30 +1,83 @@
-# go-sesh
+# sesh
 
-A Go rewrite of pi-sesh for local rootless Podman development sessions. The CLI is not implemented yet.
+A Go CLI for local rootless Podman sessions. This repository, `go-sesh`, rebuilds pi-sesh with a reusable session manager and a thin CLI.
 
-## Current implementation
+The first working path supports detached sessions with a mounted directory: **start → inspect → list → stop → remove**. It has passed live tests through both the manager and the built CLI.
 
-`internal/process` provides host subprocess execution with literal argv, explicit environments, working-directory and stdin selection, bounded stdout and stderr capture, and context cancellation. It uses the Go standard library.
+## Build
 
-The default capture limit is 16 MiB per output stream. An omitted environment means an empty child environment, not inheritance from the host. Callers must select the environment values to forward.
+Use Go 1.26 or later. The runtime requires Linux x86-64, local rootless Podman 6.1.1 or later, and cgroup v2 with memory and PID controllers.
 
-Cancellation stops the direct host process. It does not prove that a container workload or descendant process has stopped. A supplied stdin reader must not block indefinitely.
+```sh
+go build -o bin/sesh ./cmd/sesh
+./bin/sesh --help
+```
 
-`internal/session` provides session ID/name validation and a file-backed store. It can reserve a name, save a version-2 record, reopen the store, and load the record by ID or its case-sensitive name. It can atomically bind a pending record to a container ID without changing the other saved session facts. It can list validated saved records without changing files. Matching mount-session records and aliases can be removed after verified container absence. See the [session store notes](docs/session-store.md) for safety rules and current limits.
+To install the executable into your Go binary directory:
 
-`internal/runtime` defines neutral inspection/creation request types and supported state values. `internal/podman` implements restricted local CLI invocation, rootless host preflight, and ownership-checked container inspection. The session manager combines saved records with runtime observations for inspection and listing. Local-image probing and immutable image-ID resolution are implemented and tested with a fake process runner. See [runtime inspection](docs/runtime-inspection.md) for the contract and [Podman control-flow guide](docs/podman-control-flow.md) to trace calls through the code. Container-only stop/remove verify ownership and the required final state. The manager's detached mounted-session Start/Stop/Remove workflow is implemented and tested with a fake runtime, including recovery records, rollback, and per-session locks. The Podman adapter now implements `Create` and `StartDetached` and satisfies the full manager runtime interface. The approved live mounted-session smoke test passed on rootless Podman 6.1.4 with `localhost/go-sesh-smoke:1`. See the [mounted-session lifecycle](docs/mounted-session.md). The CLI is still pending. See the [container creation boundary](docs/container-creation.md).
+```sh
+go install ./cmd/sesh
+```
 
-`internal/workspace` prepares a canonical existing mounted directory without taking ownership. It refuses broad host roots, the host home, known credential/engine-state trees, and unsafe volume syntax. Copy preparation is not implemented. Mode validation accepts `mount`/`copy` and rejects obsolete `clone`. `internal/runtime` validates `none` and `pasta`; the initial manager defaults to `none`.
+The executable is `sesh`; the module and default state directory remain `go-sesh`. A tmux session manager also uses the command name `sesh`, so check for a PATH collision if you use that tool.
 
-## Planned workspace boundary
+## Use
 
-The Go target accepts a local directory through `mount` or filesystem `copy`. It does not provision Git checkouts. Copy replaces the TypeScript Git clone mode; it is not implemented yet.
+Select an image that already exists locally. The following example uses the dedicated smoke image prepared on this machine:
 
-Supplied source directories remain externally owned. Go will own only its session copies. Future sandboxd providers can acquire checkouts, but sandboxd and Git publishing workflows are outside this repository's implementation scope. Git commands can still run inside a session as ordinary workload commands.
+```sh
+./bin/sesh start --detach --name demo \
+  --image localhost/go-sesh-smoke:1 . -- /bin/sleep 300
+
+./bin/sesh inspect demo
+./bin/sesh list
+./bin/sesh stop demo
+./bin/sesh remove demo
+```
+
+Put flags before the workspace directory or session name. Put workload argv after `--`. Arguments stay literal; sesh does not construct a host shell command.
+
+The workspace is mounted read-write. Container changes affect its files. Stop retains the session and workspace. Remove refuses running or paused containers and never deletes the supplied workspace directory.
+
+Networking defaults to `none`. Use `--network pasta` explicitly when needed. Images are never pulled during session start. The container root filesystem is read-only, capabilities are dropped, and resource limits remain enforced.
+
+### Output and identity
+
+`inspect` always writes JSON. Use `--json` for other commands:
+
+```sh
+./bin/sesh list --json
+./bin/sesh stop --json demo
+./bin/sesh remove --id SESSION_UUID --json
+```
+
+Positional selectors are names, even when they look like UUIDs. `--id UUID` explicitly selects immutable identity. Sesh does not guess between names and IDs.
+
+### Container environment
+
+Use repeated `--env NAME=VALUE` flags before the directory. Values remain literal and may contain `=`. Duplicate names are refused. The runtime rejects protected and credential-like variables. It does not copy the host environment into the container.
+
+### State
+
+Default state is `$XDG_DATA_HOME/go-sesh`, or `$HOME/.local/share/go-sesh` when XDG data home is unset. Use `--state-dir DIR` to select another private directory:
+
+```sh
+./bin/sesh --state-dir /absolute/private/state list --json
+```
+
+Global flags also work after the command, before its operands. Relative explicit state directories resolve against the working directory. Existing unsafe ownership, permissions, symlinks, or records are refused rather than repaired.
+
+TypeScript pi-sesh state remains separate. Go rejects version-1 records and does not migrate them. Container names and ownership labels retain the existing pi-sesh values for compatibility.
+
+## Current limits
+
+- Start requires `--detach`, `--name`, an explicit local `--image`, a directory, and workload argv.
+- Only mounted workspaces are operational. Copy preparation is not implemented; obsolete clone mode is rejected.
+- Project configuration is not loaded. `--config`, TTY, attachment, exec, logs, resources, presets, and image builds are not implemented by the CLI.
+- Failed or cancelled startup uses verified rollback. Uncertain cleanup preserves state for recovery.
+- A detached workload can finish before start returns. A successful start reports the observed state, not a promise that it remains running.
 
 ## Development
-
-Use Go 1.26 or later. From the repository root, run:
 
 ```sh
 go test ./...
@@ -32,25 +85,15 @@ go vet ./...
 go test -race ./...
 ```
 
-Use `go test -v ./...` to show individual test results. Unit tests do not require Podman or network access.
-
-To exercise saving a session record and loading it after reopening the store:
-
-```sh
-go test -v ./internal/session -run '^TestStoreCreateReopenGet$'
-```
-
-To run the complete mounted-session workflow with a fake engine:
-
-```sh
-go test -v ./internal/session -run '^TestMountedSessionWorkflow$'
-```
-
-Live Podman tests require explicit opt-in and a prepared local image. See the [mounted-session lifecycle](docs/mounted-session.md#verification) before running them.
+Ordinary tests do not require Podman. Live tests require explicit opt-in and a prepared local image. See [live verification](docs/mounted-session.md#verification) before running them.
 
 ## References
 
-- [TypeScript behavior and approved Go changes](docs/behavior.md)
+- [CLI contract and control flow](docs/cli.md)
+- [Mounted-session lifecycle](docs/mounted-session.md)
+- [Podman control-flow guide](docs/podman-control-flow.md)
+- [Session store](docs/session-store.md)
+- [Container creation boundary](docs/container-creation.md)
+- [Behavior baseline and approved Go changes](docs/behavior.md)
 - [Go release scope](docs/scope.md)
-- [Updated rewrite plan](docs/pi-sesh-go-rewrite-plan-updated.pdf)
-- TypeScript reference implementation: `../pi-sesh/`
+- TypeScript reference: `../pi-sesh/`
