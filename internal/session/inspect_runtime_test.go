@@ -7,6 +7,14 @@ import (
 	"go-sesh/internal/runtime"
 )
 
+func (inspectorFunc) Exec(context.Context, runtime.ExecRequest) (runtime.ExecResult, error) {
+	return runtime.ExecResult{ExitCode: -1}, errors.New("unexpected exec in read-only test")
+}
+
+func (inspectorFunc) CancelExec(context.Context, runtime.Target) (runtime.Inspection, error) {
+	return runtime.Inspection{}, errors.New("unexpected exec cancellation in read-only test")
+}
+
 // Read-only fixtures must never invoke a lifecycle mutation or image probe.
 func (inspectorFunc) Preflight(context.Context, runtime.NetworkMode) (runtime.HostInfo, error) {
 	return runtime.HostInfo{}, errors.New("unexpected preflight in read-only test")

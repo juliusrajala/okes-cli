@@ -22,7 +22,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	defer stop()
 	environment := os.Environ()
 	return cli.Run(ctx, args, cli.Options{
-		Stdout: stdout, Stderr: stderr, Environment: environment, Getwd: os.Getwd,
+		Stdin: os.Stdin, Stdout: stdout, Stderr: stderr, Environment: environment, Getwd: os.Getwd,
 		Open: func(stateDir, projectDir string) (cli.Backend, error) {
 			client, err := podman.New(podman.Options{SourceEnv: environment, ProjectDir: projectDir})
 			if err != nil {

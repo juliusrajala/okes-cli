@@ -12,6 +12,14 @@ import (
 	"go-sesh/internal/workspace"
 )
 
+type executionOutput struct {
+	SessionID   session.ID `json:"sessionId"`
+	ExecutionID session.ID `json:"executionId"`
+	ExitCode    int        `json:"exitCode"`
+	Stdout      string     `json:"stdout"`
+	Stderr      string     `json:"stderr"`
+}
+
 // Keep the CLI schema separate from domain structs. The saved container ID and
 // observed ID remain distinct for pending recovery records and missing containers.
 type sessionOutput struct {

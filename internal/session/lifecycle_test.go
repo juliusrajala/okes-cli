@@ -34,6 +34,8 @@ type lifecycleRuntime struct {
 	afterCreate      func()
 	afterStart       func()
 	cleanupWasActive bool
+	execFunc         func(context.Context, runtime.ExecRequest) (runtime.ExecResult, error)
+	cancelExecFunc   func(context.Context, runtime.Target) (runtime.Inspection, error)
 }
 
 func (f *lifecycleRuntime) step(ctx context.Context, op string) error {

@@ -71,6 +71,9 @@ func (s *Store) Delete(ctx context.Context, expected Record) (err error) {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if err := s.deleteExecutions(ctx, expected.ID); err != nil {
+		return fmt.Errorf("remove execution receipts; session retained: %w", err)
+	}
 	if err := removeStoreFile(s.sessions, recordPath(expected.ID), recordInfo); err != nil {
 		return fmt.Errorf("remove session record; reservation retained: %w", err)
 	}

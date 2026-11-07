@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -24,9 +26,17 @@ type Command struct {
 	Dir string
 	// Env contains KEY=value entries. Nil and empty both mean no environment.
 	Env []string
-	// Stdin defaults to EOF. A supplied reader must not block indefinitely;
-	// context cancellation cannot interrupt an arbitrary reader's Read method.
+	// Stdin defaults to EOF. A supplied non-file reader must not block
+	// indefinitely; cancellation cannot interrupt an arbitrary Read method.
+	// An *os.File is inherited directly without a parent input-copy goroutine.
 	Stdin io.Reader
+	// Stdout and Stderr optionally receive live output in addition to capture.
+	// Run borrows these writers. It serializes their Write calls because both
+	// streams may share a writer. A write failure cancels the host process.
+	// Writers must not block indefinitely; cancellation cannot interrupt an
+	// arbitrary writer's Write method.
+	Stdout io.Writer
+	Stderr io.Writer
 	// OutputLimit applies separately to stdout and stderr. Zero uses
 	// DefaultOutputLimit. Negative values are invalid.
 	OutputLimit int
@@ -80,11 +90,18 @@ func Run(ctx context.Context, command Command) (Result, error) {
 	// A non-nil empty slice prevents os/exec from inheriting the host environment.
 	cmd.Env = append([]string{}, command.Env...)
 	input := inputReader{source: command.Stdin, cancel: cancel}
-	if command.Stdin != nil {
+	if file, ok := command.Stdin.(*os.File); ok {
+		// Inherit the descriptor without a copy goroutine blocked on terminal
+		// input. The child closes its descriptor; the caller retains its own.
+		cmd.Stdin = file
+	} else if command.Stdin != nil {
 		cmd.Stdin = &input
 	}
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	var outputMu sync.Mutex
+	out := outputWriter{capture: &stdout, destination: command.Stdout, mu: &outputMu, cancel: cancel}
+	diagnostic := outputWriter{capture: &stderr, destination: command.Stderr, mu: &outputMu, cancel: cancel}
+	cmd.Stdout = &out
+	cmd.Stderr = &diagnostic
 	// Descendants can keep output pipes open after the direct process exits.
 	// Bound that wait rather than leaving the caller blocked on those pipes.
 	cmd.WaitDelay = time.Second
@@ -101,6 +118,9 @@ func Run(ctx context.Context, command Command) (Result, error) {
 	}
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return result, fmt.Errorf("run %q: %w", command.Path, ctxErr)
+	}
+	if out.err != nil || diagnostic.err != nil {
+		return result, fmt.Errorf("write output for %q: %w", command.Path, errors.Join(out.err, diagnostic.err))
 	}
 	if input.err != nil {
 		return result, fmt.Errorf("read stdin for %q: %w", command.Path, input.err)

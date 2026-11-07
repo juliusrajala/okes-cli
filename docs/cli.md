@@ -4,6 +4,8 @@
 
 `sesh` exposes the verified detached mounted-session path. It supports start, inspect, list, stop, and remove. It uses the standard library `flag` package and has no CLI framework dependency.
 
+Exec supports literal argv in a verified running session, live output, optional timeouts, workload exit statuses, and private execution receipts. Cancellation stops the container and verifies the result. Unit tests cover the transaction; live exec verification remains pending. See [execution support](exec.md).
+
 The CLI does not implement Podman policy or cleanup. It does not load project configuration. Unsupported commands and flags fail explicitly.
 
 ## Command contract
@@ -17,6 +19,7 @@ inspect NAME | --id UUID
 list
 stop NAME | --id UUID
 remove NAME | --id UUID
+exec --session-id UUID [--cwd /workspace] [--timeout SECONDS] NAME -- PROGRAM [ARG ...]
 ```
 
 Flags must precede positional arguments. Common flags also work after the command, before its operands. Workload argv must follow `--`; it is never re-parsed as CLI flags. Literal spaces, shell characters, and values beginning with `--` remain separate workload arguments.
@@ -35,7 +38,7 @@ The binary is `sesh`, while the module remains `go-sesh`. Default state is `$XDG
 
 This intentionally differs from TypeScript's `pi-sesh` state namespace. Existing TypeScript sessions are not imported or migrated. Ownership labels, container-name prefixes, and the version-2 record format remain unchanged.
 
-The first CLI is a supported subset, not complete TypeScript CLI parity. It adds explicit JSON output and state selection. It omits project defaults, config files, resources, copy provisioning, TTY, attachment, exec/logs, presets, and build commands.
+The first CLI is a supported subset, not complete TypeScript CLI parity. It adds explicit JSON output and state selection. It omits project defaults, config files, resources, copy provisioning, TTY, attachment, logs, presets, and build commands.
 
 ## Output and status
 
@@ -50,7 +53,7 @@ The first CLI is a supported subset, not complete TypeScript CLI parity. It adds
 - Output does not contain the container environment or resource secrets.
 - Text output quotes paths to prevent embedded tabs/newlines from changing row structure. It has no TTY color behavior yet.
 
-Exit statuses are 0 for success/help, 2 for usage errors, 130 for context cancellation, and 1 for other failures. SIGINT and SIGTERM both cancel the manager context. Startup rollback can finish with its independent bounded cleanup context before the CLI exits. This initial CLI uses 130 for either cancellation signal.
+Exit statuses are 0 for success/help, 2 for usage errors, 130 for context cancellation, and 1 for other failures. Exec preserves ordinary workload exit statuses without adding a diagnostic. SIGINT and SIGTERM both cancel the manager context. Startup rollback can finish with its independent bounded cleanup context before the CLI exits. This initial CLI uses 130 for either cancellation signal.
 
 The CLI borrows stdout/stderr and never closes them. It closes its opened store even after command or output failures. If detached startup succeeded but output fails, the CLI reports an error and leaves the saved session available for inspection; it does not silently stop a successful detached workload.
 

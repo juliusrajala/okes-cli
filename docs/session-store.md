@@ -1,5 +1,7 @@
 # Session store
 
+Execution receipt storage now supports private creation, strict reads, atomic final updates, and cleanup before session record deletion. Receipt cleanup requires the same verified container absence as other session-owned data. The exec transaction now creates and finalizes receipts, including after cancellation or recovery failure. See [execution support](exec.md).
+
 The store saves session metadata. It does not start containers, inspect runtime state, or own source directories.
 
 ## Implemented path

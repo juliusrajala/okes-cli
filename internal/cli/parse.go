@@ -4,9 +4,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"go-sesh/internal/runtime"
 	"go-sesh/internal/session"
@@ -29,6 +31,13 @@ type command struct {
 	selector string
 	id       session.ID
 	start    session.StartRequest
+	exec     session.ExecRequest
+}
+
+type execOptions struct {
+	sessionID  string
+	timeout    float64
+	hasTimeout bool
 }
 
 type startOptions struct {
@@ -67,13 +76,13 @@ func parse(args []string) (command, error) {
 	}
 	cmd.name = root.Arg(0)
 	switch cmd.name {
-	case "start", "inspect", "list", "stop", "remove":
+	case "start", "inspect", "list", "stop", "remove", "exec":
 	default:
 		return cmd, usage("unknown command %q", cmd.name)
 	}
 	args = root.Args()[1:]
 	var workload []string
-	if cmd.name == "start" {
+	if cmd.name == "start" || cmd.name == "exec" {
 		if index := slices.Index(args, "--"); index >= 0 {
 			workload = slices.Clone(args[index+1:])
 			args = args[:index]
@@ -82,6 +91,7 @@ func parse(args []string) (command, error) {
 	flags := flagSet(cmd.name)
 	commonFlags(flags, &cmd)
 	var start startOptions
+	var execution execOptions
 	var id string
 	if cmd.name == "start" {
 		flags.StringVar(&cmd.start.Name, "name", "", "Unique session name (required)")
@@ -90,6 +100,10 @@ func parse(args []string) (command, error) {
 		flags.StringVar(&start.network, "network", "none", "none or pasta")
 		flags.StringVar(&start.mode, "workspace", "mount", "Only mount is implemented")
 		flags.Var(&start.environment, "env", "Literal container NAME=VALUE; repeatable")
+	} else if cmd.name == "exec" {
+		flags.StringVar(&execution.sessionID, "session-id", "", "Matching immutable session UUID (required)")
+		flags.StringVar(&cmd.exec.Workdir, "cwd", "/workspace", "Container working directory")
+		flags.Float64Var(&execution.timeout, "timeout", 0, "Timeout in seconds; stops the session container")
 	} else if cmd.name != "list" {
 		flags.StringVar(&id, "id", "", "Immutable UUID instead of a session name")
 	}
@@ -106,6 +120,9 @@ func parse(args []string) (command, error) {
 	switch cmd.name {
 	case "start":
 		return parseStart(cmd, start, flags.Args(), workload)
+	case "exec":
+		flags.Visit(func(value *flag.Flag) { execution.hasTimeout = execution.hasTimeout || value.Name == "timeout" })
+		return parseExec(cmd, execution, flags.Args(), workload)
 	case "list":
 		if flags.NArg() != 0 {
 			return cmd, usage("list accepts no positional arguments")
@@ -156,6 +173,41 @@ func parseStart(cmd command, options startOptions, operands, workload []string) 
 	cmd.start.Environment = values
 	cmd.start.Command = workload
 	cmd.start.WorkspacePath = operands[0]
+	return cmd, nil
+}
+
+func parseExec(cmd command, options execOptions, operands, workload []string) (command, error) {
+	if len(operands) != 1 {
+		return cmd, usage("exec requires a session name and --session-id UUID")
+	}
+	if err := session.ValidateName(operands[0]); err != nil {
+		return cmd, usage("%v", err)
+	}
+	id, err := session.ParseID(options.sessionID)
+	if err != nil {
+		return cmd, usage("--session-id: %v", err)
+	}
+	if len(workload) == 0 {
+		return cmd, usage("pass exec workload argv after --")
+	}
+	if cmd.exec.Workdir == "" {
+		return cmd, usage("--cwd must be an absolute container path")
+	}
+	if err := (runtime.ExecRequest{Command: workload, Workdir: cmd.exec.Workdir}).Validate(); err != nil {
+		return cmd, usage("%v", err)
+	}
+	if options.hasTimeout {
+		if math.IsNaN(options.timeout) || math.IsInf(options.timeout, 0) || options.timeout <= 0 || options.timeout > 86400 {
+			return cmd, usage("--timeout must be greater than zero and no more than 86400 seconds")
+		}
+		cmd.exec.Timeout = time.Duration(options.timeout * float64(time.Second))
+		if cmd.exec.Timeout == 0 {
+			return cmd, usage("--timeout must be at least one nanosecond")
+		}
+	}
+	cmd.exec.Name = operands[0]
+	cmd.exec.SessionID = id
+	cmd.exec.Command = workload
 	return cmd, nil
 }
 

@@ -77,4 +77,6 @@ The manager's detached mount workflow now implements Start/Inspect/Stop/Remove w
 
 The minimal `sesh` CLI now exposes start/inspect/list/stop/remove for detached mounted sessions, with JSON output, explicit literal argv, and a separate default `go-sesh` state directory. The built CLI passed a live smoke workflow with source preservation and unchanged existing session IDs. The module, record schema, and ownership labels remain unchanged. See the [CLI contract](cli.md).
 
-Next work extends this usable path toward exec/logs, configuration, copy workspaces, and resources. These remain separate features, not completed CLI parity. Keep Git provisioning and orchestration outside these types and APIs.
+Exec CLI/engine support, live output handling, the session transaction, and private receipts are implemented and unit-tested. Tests cover verified cancellation, timeout, and receipt failures. Live exec verification remains pending. See [execution support](exec.md).
+
+Next work verifies exec with live Podman and then extends this usable path toward logs, configuration, copy workspaces, and resources. These remain separate features, not completed CLI parity. Keep Git provisioning and orchestration outside these types and APIs.

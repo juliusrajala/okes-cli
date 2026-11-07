@@ -28,15 +28,18 @@ func testView() session.View {
 }
 
 type fakeBackend struct {
-	calls      []string
-	ids        []session.ID
-	request    session.StartRequest
-	view       session.View
-	views      []session.View
-	err        error
-	resolveErr error
-	closeErr   error
-	closed     int
+	calls       []string
+	ids         []session.ID
+	request     session.StartRequest
+	view        session.View
+	views       []session.View
+	err         error
+	resolveErr  error
+	closeErr    error
+	closed      int
+	execRequest session.ExecRequest
+	execResult  session.ExecResult
+	execFunc    func(context.Context, session.ExecRequest) (session.ExecResult, error)
 }
 
 func (b *fakeBackend) Start(_ context.Context, request session.StartRequest) (session.View, error) {
@@ -66,6 +69,15 @@ func (b *fakeBackend) Remove(_ context.Context, id session.ID) error {
 	b.calls = append(b.calls, "remove")
 	b.ids = append(b.ids, id)
 	return b.err
+}
+
+func (b *fakeBackend) Exec(ctx context.Context, request session.ExecRequest) (session.ExecResult, error) {
+	b.calls = append(b.calls, "exec")
+	b.execRequest = request
+	if b.execFunc != nil {
+		return b.execFunc(ctx, request)
+	}
+	return b.execResult, b.err
 }
 
 func (b *fakeBackend) Resolve(_ context.Context, name string) (session.ID, error) {

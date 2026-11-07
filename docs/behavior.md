@@ -36,6 +36,10 @@ The first CLI supports start/inspect/list/stop/remove for detached mounted sessi
 
 Positional session selectors are names; `--id UUID` explicitly selects immutable identity. Inspect always returns JSON, and other commands support `--json`. The CLI uses plain text for human summaries and lists; it does not port TypeScript's terminal color behavior. Flags precede positional operands. See the [CLI contract](cli.md) for syntax, JSON fields, and exit statuses.
 
+### Go exec
+
+Exec is implemented and unit-tested. Its CLI keeps the TypeScript requirement for both a name and matching `--session-id UUID`. The manager serializes the execution transaction with session lifecycle mutations. Unlike ordinary Stop, execution cancellation uses an immediate stop and accepts verified absence. Receipt storage, strict validation, atomic publication, and removal after verified container absence are implemented. The transaction saves a running receipt before execution and a final receipt after execution or recovery. Container cancellation has a separate 30-second timeout. Receipt persistence has its own 5-second timeout and still runs after caller cancellation or an expired container-stop budget. Live exec verification remains pending. See [execution support](exec.md).
+
 ### Decisions required before copy implementation
 
 - Define symlink handling, special-file handling, size and entry limits, and copied permissions.

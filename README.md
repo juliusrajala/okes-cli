@@ -73,7 +73,8 @@ TypeScript pi-sesh state remains separate. Go rejects version-1 records and does
 
 - Start requires `--detach`, `--name`, an explicit local `--image`, a directory, and workload argv.
 - Only mounted workspaces are operational. Copy preparation is not implemented; obsolete clone mode is rejected.
-- Project configuration is not loaded. `--config`, TTY, attachment, exec, logs, resources, presets, and image builds are not implemented by the CLI.
+- Project configuration is not loaded. `--config`, TTY, attachment, logs, resources, presets, and image builds are not implemented by the CLI.
+- Exec supports literal argv, live output, optional timeouts, private receipts, and verified container cancellation. Supply both the name and matching `--session-id UUID`. Exec is unit-tested but has not yet passed a live Podman test. See [execution support](docs/exec.md).
 - Failed or cancelled startup uses verified rollback. Uncertain cleanup preserves state for recovery.
 - A detached workload can finish before start returns. A successful start reports the observed state, not a promise that it remains running.
 
